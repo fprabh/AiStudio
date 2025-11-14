@@ -1,0 +1,5 @@
+{
+  "name": "Inventory Management System",
+  "description": "A precise inventory management application for a production company. It provides real-time counts of raw materials and packaging supplies, a system for adding incoming stock, and a system for logging shipments that automatically deducts consumed components based on predefined product formulas.",
+  "requestFramePermissions": []
+}
