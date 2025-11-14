@@ -1,6 +1,6 @@
 import React from 'react';
 import { View } from '../types';
-import { logoBase64 } from '../assets/logo';
+import { logoUrl } from '../assets/logo';
 import { Theme } from '../hooks/useTheme';
 
 interface HeaderProps {
@@ -59,7 +59,7 @@ const Header: React.FC<HeaderProps> = ({ setView, currentView, theme, toggleThem
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <div className="flex-shrink-0">
-             <img src={logoBase64} alt="Novoshield Logo" className="h-9" />
+             <img src={logoUrl} alt="Novoshield Logo" className="h-9" />
           </div>
           <div className="flex items-center">
             <nav className="flex space-x-1 sm:space-x-2">
