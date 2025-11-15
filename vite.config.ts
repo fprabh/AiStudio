@@ -7,6 +7,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 3000, // Optional: specify a port
-    open: true,   // Optional: automatically open the app in the browser
+    // FIX: The configuration for `server.open` was using an object structure that
+    // seems unsupported in the current environment, causing a type error.
+    // Switched to a string value to specify the browser directly.
+    // Note: This method does not support passing command-line arguments like '--inprivate'.
+    open: 'microsoft-edge',
   },
 });
