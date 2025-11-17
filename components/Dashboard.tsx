@@ -54,16 +54,6 @@ const calculateMaxPallets = (product: typeof FINISHED_PRODUCTS[0], inventory: In
     return Math.max(0, Math.min(...possiblePalletsPerItem));
 };
 
-const ActionButton: React.FC<{ onClick: () => void, label: string, icon: React.ReactElement, color: string }> = ({ onClick, label, icon, color }) => (
-    <button
-        onClick={onClick}
-        className={`w-full flex items-center justify-center space-x-3 px-4 py-3 rounded-lg text-white font-semibold transition-transform duration-200 transform hover:scale-105 ${color}`}
-    >
-        {icon}
-        <span>{label}</span>
-    </button>
-);
-
 const Dashboard: React.FC<DashboardProps> = ({ inventory, setView, settings }) => {
     const lowStockItems = INVENTORY_ITEMS
         .filter(item => {
@@ -87,14 +77,6 @@ const Dashboard: React.FC<DashboardProps> = ({ inventory, setView, settings }) =
 
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Actions</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <ActionButton onClick={() => setView('addStock')} label="Add Incoming Stock" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>} color="bg-brand-dark hover:bg-brand-gray" />
-          <ActionButton onClick={() => setView('logShipment')} label="Log a Shipment" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>} color="bg-brand-red hover:bg-red-700" />
-        </div>
-      </div>
-      
       <div>
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Stock Alerts</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
