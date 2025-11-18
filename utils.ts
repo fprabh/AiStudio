@@ -20,13 +20,15 @@ export const calculateDeductions = (productId: ProductId, cartonsShipped: number
         let quantity = 0;
         const itemInfo = ITEMS_MAP.get(itemId);
         if(itemInfo?.unit === 'rolls') {
-            const fabricMetersUsed = totalMasks * settings.materialUsage.fabricPerMask;
-            quantity = fabricMetersUsed / METERS_PER_ROLL;
-        } else if(itemId === 'nosewire') {
-            quantity = totalMasks * settings.materialUsage.nosewirePerMask;
-        } else if(itemId === 'elastic') {
-            quantity = totalMasks * settings.materialUsage.elasticPerMask;
-        }
+            if (itemId === 'nosewire') {
+                 quantity = totalMasks / settings.materialUsage.masksPerRollNosewire;
+            } else if (itemId === 'elastic') {
+                 quantity = totalMasks / settings.materialUsage.masksPerRollElastic;
+            } else {
+                 const fabricMetersUsed = totalMasks * settings.materialUsage.fabricPerMask;
+                 quantity = fabricMetersUsed / METERS_PER_ROLL;
+            }
+        } 
         
         const rejectionRate = settings.rejectionCoefficients[itemId] || 0;
         const adjustedQuantity = quantity * (1 + rejectionRate / 100);

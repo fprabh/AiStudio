@@ -26,12 +26,12 @@ const calculateMaxPallets = (product: typeof FINISHED_PRODUCTS[0], inventory: In
         if (settings.bypassedItems[itemId]) return;
         const rejection = 1 + (settings.rejectionCoefficients[itemId] || 0) / 100;
         let requiredQty = 0;
-        if (ITEMS_MAP.get(itemId)?.unit === 'rolls') {
-            requiredQty = (masksPerPallet * settings.materialUsage.fabricPerMask / METERS_PER_ROLL) * rejection;
-        } else if (itemId === 'nosewire') {
-            requiredQty = (masksPerPallet * settings.materialUsage.nosewirePerMask) * rejection;
+        if (itemId === 'nosewire') {
+            requiredQty = (masksPerPallet / settings.materialUsage.masksPerRollNosewire) * rejection;
         } else if (itemId === 'elastic') {
-            requiredQty = (masksPerPallet * settings.materialUsage.elasticPerMask) * rejection;
+            requiredQty = (masksPerPallet / settings.materialUsage.masksPerRollElastic) * rejection;
+        } else if (ITEMS_MAP.get(itemId)?.unit === 'rolls') {
+            requiredQty = (masksPerPallet * settings.materialUsage.fabricPerMask / METERS_PER_ROLL) * rejection;
         }
         requirementsPerPallet[itemId] = requiredQty;
     });

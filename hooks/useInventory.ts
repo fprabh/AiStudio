@@ -12,8 +12,8 @@ const generateDefaultSettings = (): AppSettings => ({
     productFormulas: DEDUCTION_RULES,
     materialUsage: {
         fabricPerMask: 0.175,
-        nosewirePerMask: 0.0105,
-        elasticPerMask: 0.210,
+        masksPerRollNosewire: 15000,
+        masksPerRollElastic: 6000,
     }
 });
 

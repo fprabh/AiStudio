@@ -39,12 +39,12 @@ const LogShipmentForm: React.FC<LogShipmentFormProps> = ({ logShipment, setView,
         const itemId = unknownItemId as InventoryItemId;
         const rejection = 1 + (settings.rejectionCoefficients[itemId] || 0) / 100;
         let requiredQty = 0;
-        if (ITEMS_MAP.get(itemId)?.unit === 'rolls') {
-            requiredQty = (totalMasks * settings.materialUsage.fabricPerMask / METERS_PER_ROLL) * rejection;
-        } else if (itemId === 'nosewire') {
-            requiredQty = (totalMasks * settings.materialUsage.nosewirePerMask) * rejection;
+        if (itemId === 'nosewire') {
+            requiredQty = (totalMasks / settings.materialUsage.masksPerRollNosewire) * rejection;
         } else if (itemId === 'elastic') {
-            requiredQty = (totalMasks * settings.materialUsage.elasticPerMask) * rejection;
+            requiredQty = (totalMasks / settings.materialUsage.masksPerRollElastic) * rejection;
+        } else if (ITEMS_MAP.get(itemId)?.unit === 'rolls') {
+            requiredQty = (totalMasks * settings.materialUsage.fabricPerMask / METERS_PER_ROLL) * rejection;
         }
         deductions[itemId] = requiredQty;
     });

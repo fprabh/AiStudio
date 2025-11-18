@@ -54,7 +54,7 @@ export interface Product {
 export interface DeductionRule {
   boxesPerCarton: number;
   masksPerBox: number;
-  cartonsPerPallet: number; // New field
+  cartonsPerPallet: number; 
   rawMaterials: {
     meltblown: InventoryItemId;
     backLayer: InventoryItemId;
@@ -75,7 +75,7 @@ export interface AppSettings {
     productFormulas: Record<ProductId, DeductionRule>;
     materialUsage: {
         fabricPerMask: number;
-        nosewirePerMask: number;
-        elasticPerMask: number;
+        masksPerRollNosewire: number;
+        masksPerRollElastic: number;
     };
 }

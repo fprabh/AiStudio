@@ -10,8 +10,8 @@ export const INVENTORY_ITEMS: InventoryItem[] = [
   { id: 'outerLayerL2Blue', name: 'Outer Layer - L2 Blue', unit: 'rolls', category: 'Raw Materials', subCategory: 'Fabrics' },
   { id: 'outerLayerL3Pink', name: 'Outer Layer - L3 Pink', unit: 'rolls', category: 'Raw Materials', subCategory: 'Fabrics' },
   { id: 'outerLayerL3Blue', name: 'Outer Layer - L3 Blue', unit: 'rolls', category: 'Raw Materials', subCategory: 'Fabrics' },
-  { id: 'nosewire', name: 'Nosewire', unit: 'meters', category: 'Raw Materials', subCategory: 'Components' },
-  { id: 'elastic', name: 'Elastic', unit: 'meters', category: 'Raw Materials', subCategory: 'Components' },
+  { id: 'nosewire', name: 'Nosewire', unit: 'rolls', category: 'Raw Materials', subCategory: 'Components' },
+  { id: 'elastic', name: 'Elastic', unit: 'rolls', category: 'Raw Materials', subCategory: 'Components' },
   // Packaging Materials
   { id: 'phsaMaskBox', name: 'PHSA Mask Box', unit: 'items', category: 'Packaging Materials', subCategory: 'Boxes' },
   { id: 'padmMaskBox', name: 'PADM Mask Box', unit: 'items', category: 'Packaging Materials', subCategory: 'Boxes' },

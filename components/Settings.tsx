@@ -115,19 +115,19 @@ const Settings: React.FC<SettingsProps> = ({ settings: initialSettings, updateSe
 
              {/* Material Usage Settings */}
             <div className="p-6 bg-white dark:bg-gray-800 rounded-lg shadow-md">
-                <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Material Usage per Mask</h3>
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Material Usage / Capacity</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div>
-                        <label htmlFor="fabricPerMask" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Fabric Usage (meters)</label>
+                        <label htmlFor="fabricPerMask" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Fabric Usage (meters/mask)</label>
                         <input id="fabricPerMask" type="number" step="0.001" className="w-full text-left bg-gray-100 dark:bg-gray-700 rounded p-1.5 mt-1 border-gray-300 focus:ring-brand-red focus:border-brand-red" value={localSettings.materialUsage.fabricPerMask} onChange={e => handleSettingsChange('materialUsage', 'fabricPerMask', '', parseFloat(e.target.value) || 0)} />
                     </div>
                     <div>
-                        <label htmlFor="nosewirePerMask" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Nosewire Usage (meters)</label>
-                        <input id="nosewirePerMask" type="number" step="0.0001" className="w-full text-left bg-gray-100 dark:bg-gray-700 rounded p-1.5 mt-1 border-gray-300 focus:ring-brand-red focus:border-brand-red" value={localSettings.materialUsage.nosewirePerMask} onChange={e => handleSettingsChange('materialUsage', 'nosewirePerMask', '', parseFloat(e.target.value) || 0)} />
+                        <label htmlFor="nosewirePerRoll" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Masks per Roll (Nosewire)</label>
+                        <input id="nosewirePerRoll" type="number" className="w-full text-left bg-gray-100 dark:bg-gray-700 rounded p-1.5 mt-1 border-gray-300 focus:ring-brand-red focus:border-brand-red" value={localSettings.materialUsage.masksPerRollNosewire} onChange={e => handleSettingsChange('materialUsage', 'masksPerRollNosewire', '', parseFloat(e.target.value) || 0)} />
                     </div>
                     <div>
-                        <label htmlFor="elasticPerMask" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Elastic Usage (meters)</label>
-                        <input id="elasticPerMask" type="number" step="0.001" className="w-full text-left bg-gray-100 dark:bg-gray-700 rounded p-1.5 mt-1 border-gray-300 focus:ring-brand-red focus:border-brand-red" value={localSettings.materialUsage.elasticPerMask} onChange={e => handleSettingsChange('materialUsage', 'elasticPerMask', '', parseFloat(e.target.value) || 0)} />
+                        <label htmlFor="elasticPerRoll" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Masks per Roll (Elastic)</label>
+                        <input id="elasticPerRoll" type="number" className="w-full text-left bg-gray-100 dark:bg-gray-700 rounded p-1.5 mt-1 border-gray-300 focus:ring-brand-red focus:border-brand-red" value={localSettings.materialUsage.masksPerRollElastic} onChange={e => handleSettingsChange('materialUsage', 'masksPerRollElastic', '', parseFloat(e.target.value) || 0)} />
                     </div>
                 </div>
             </div>
