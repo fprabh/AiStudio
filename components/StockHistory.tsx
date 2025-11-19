@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState } from 'react';
-import { Transaction, Category, InventoryItemId } from '../types';
+import { Transaction, Category, InventoryItemId, InventoryState } from '../types';
 import { INVENTORY_ITEMS } from '../constants';
 import { useInventory } from '../hooks/useInventory';
 import EditTransactionModal from './EditTransactionModal';
@@ -11,6 +11,7 @@ interface StockHistoryProps {
   updateTransaction: ReturnType<typeof useInventory>['updateTransaction'];
   deleteTransaction: ReturnType<typeof useInventory>['deleteTransaction'];
   settings: ReturnType<typeof useInventory>['settings'];
+  inventory: InventoryState;
 }
 
 type StockTransaction = Transaction & { 
@@ -25,7 +26,7 @@ type SortDirection = 'asc' | 'desc';
 
 const ITEMS_MAP = new Map(INVENTORY_ITEMS.map(item => [item.id, item]));
 
-const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransaction, deleteTransaction, settings }) => {
+const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransaction, deleteTransaction, settings, inventory }) => {
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection }>({
     key: 'date',
     direction: 'desc',
@@ -229,6 +230,7 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
                 onClose={() => setEditingTransaction(null)}
                 onSave={confirmEdit}
                 settings={settings}
+                inventory={inventory}
             />
         )}
         <ConfirmationModal 

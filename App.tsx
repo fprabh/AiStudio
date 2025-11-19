@@ -53,6 +53,7 @@ const App: React.FC = () => {
                   updateTransaction={inventoryData.updateTransaction}
                   deleteTransaction={inventoryData.deleteTransaction}
                   settings={inventoryData.settings}
+                  inventory={inventoryData.inventory}
                />;
       case 'addStock':
         return <AddStockForm addStock={inventoryData.addStock} setView={setView} />;

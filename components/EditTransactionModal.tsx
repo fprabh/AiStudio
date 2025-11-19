@@ -237,6 +237,60 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
         );
     };
 
+    const renderStockInImpact = () => {
+        if (!inventory || !formData.itemId) return null;
+
+        const item = ITEMS_MAP.get(formData.itemId as InventoryItemId);
+        if (!item) return null;
+
+        const currentStock = inventory[formData.itemId as InventoryItemId] || 0;
+        
+        // Calculate Base Stock (Stock without this transaction's contribution)
+        // We only subtract the original amount if the item ID matches the one currently being edited.
+        // Since IN transactions typically have 1 detail item, we look for it.
+        const originalDetail = transaction.details.find(d => d.itemId === formData.itemId);
+        const originalContribution = originalDetail ? originalDetail.quantity : 0;
+
+        const baseStock = currentStock - originalContribution;
+        const addingQty = formData.quantity;
+        const newTotal = baseStock + addingQty;
+        
+        const formatVal = (val: number) => item.unit === 'rolls' ? val.toFixed(2) : val.toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+        return (
+             <div className="pt-2">
+                <h4 className="text-sm font-semibold mb-2">Inventory Impact:</h4>
+                <div className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded overflow-hidden">
+                     <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                             <thead className="bg-gray-100 dark:bg-gray-800 sticky top-0">
+                                <tr>
+                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Item</th>
+                                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Adding</th>
+                                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Base Stock</th>
+                                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">New Total</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                                <tr className="bg-white dark:bg-gray-800 text-xs">
+                                    <td className="px-3 py-2 font-medium text-gray-900 dark:text-white">{item.name}</td>
+                                    <td className="px-3 py-2 text-right font-mono text-green-600 dark:text-green-400">+{formatVal(addingQty)}</td>
+                                    <td className="px-3 py-2 text-right font-mono text-gray-600 dark:text-gray-300">{formatVal(baseStock)}</td>
+                                    <td className="px-3 py-2 text-right font-mono font-bold text-gray-900 dark:text-white">
+                                        {formatVal(newTotal)}
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                 <p className="text-xs text-gray-400 mt-1 italic">
+                    * Base Stock is current stock minus the original entry amount (if applicable).
+                </p>
+            </div>
+        );
+    };
+
     return (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center p-4 z-50">
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-lg max-h-full overflow-y-auto">
@@ -278,6 +332,7 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
                     ) : null}
 
                     {transaction.type === 'SHIPMENT' && productInventory && renderShipmentStockCheck()}
+                    {transaction.type === 'IN' && inventory && renderStockInImpact()}
 
                     <div className="flex justify-end space-x-3 pt-4">
                         <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-200 dark:hover:bg-gray-500">
