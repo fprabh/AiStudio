@@ -1,6 +1,7 @@
+
 import { useState, useEffect, useCallback } from 'react';
-import { InventoryState, Transaction, InventoryItemId, ProductId, TransactionDetail, AppSettings } from '../types';
-import { INITIAL_INVENTORY_STATE, INVENTORY_ITEMS, DEDUCTION_RULES, FINISHED_PRODUCTS } from '../constants';
+import { InventoryState, ProductState, Transaction, InventoryItemId, ProductId, TransactionDetail, AppSettings } from '../types';
+import { INITIAL_INVENTORY_STATE, INITIAL_PRODUCT_STATE, INVENTORY_ITEMS, DEDUCTION_RULES, FINISHED_PRODUCTS } from '../constants';
 import { calculateDeductions } from '../utils';
 
 const ITEMS_MAP = new Map(INVENTORY_ITEMS.map(item => [item.id, item]));
@@ -34,11 +35,14 @@ const mergeSettings = (loadedSettings: Partial<AppSettings>): AppSettings => {
 export const useInventory = () => {
   // Inventory state is now derived from transactions, not stored directly.
   const [inventory, setInventory] = useState<InventoryState>(INITIAL_INVENTORY_STATE);
+  const [productInventory, setProductInventory] = useState<ProductState>(INITIAL_PRODUCT_STATE);
 
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
     try {
       const saved = localStorage.getItem('transactions');
-      return saved ? JSON.parse(saved) : [];
+      const loaded = saved ? JSON.parse(saved) : [];
+      // Migration: Map legacy 'OUT' to 'PRODUCTION'
+      return loaded.map((t: Transaction) => t.type === 'OUT' ? { ...t, type: 'PRODUCTION' } : t);
     } catch (error) { return []; }
   });
 
@@ -50,30 +54,39 @@ export const useInventory = () => {
     } catch (error) { return generateDefaultSettings(); }
   });
 
-  // This is the new core logic: Recalculate inventory from the single source of truth (transactions) and current settings.
+  // Core Logic: Recalculate both Raw Materials and Finished Goods from transactions
   useEffect(() => {
     const newInventory = { ...INITIAL_INVENTORY_STATE };
+    const newProductInventory = { ...INITIAL_PRODUCT_STATE };
+
     // Transactions are stored newest-first, so we reverse to process them chronologically.
     [...transactions].reverse().forEach(tx => {
         if (tx.type === 'IN') {
             tx.details.forEach(detail => {
                 newInventory[detail.itemId] = (newInventory[detail.itemId] || 0) + detail.quantity;
             });
-        } else if (tx.type === 'OUT' && tx.productId && tx.cartonsShipped) {
+        } else if (tx.type === 'PRODUCTION' && tx.productId && tx.cartonsShipped) {
+            // 1. Deduct Raw Materials
             const deductions = calculateDeductions(tx.productId, tx.cartonsShipped, settings);
             deductions.forEach(detail => {
-                newInventory[detail.itemId] = (newInventory[detail.itemId] || 0) + detail.quantity; // quantity is already negative
+                newInventory[detail.itemId] = (newInventory[detail.itemId] || 0) + detail.quantity; // quantity is negative
             });
+            // 2. Add Finished Good to Stock
+            newProductInventory[tx.productId] = (newProductInventory[tx.productId] || 0) + tx.cartonsShipped;
+
+        } else if (tx.type === 'SHIPMENT' && tx.productId && tx.cartonsShipped) {
+            // 1. Deduct Finished Good from Stock
+             newProductInventory[tx.productId] = (newProductInventory[tx.productId] || 0) - tx.cartonsShipped;
         }
     });
     setInventory(newInventory);
+    setProductInventory(newProductInventory);
   }, [transactions, settings]);
 
 
   // Persist only the sources of truth to localStorage.
   useEffect(() => {
     try {
-      // Inventory state is no longer persisted as it's a derived value.
       localStorage.setItem('transactions', JSON.stringify(transactions));
       localStorage.setItem('inventoryAppSettings', JSON.stringify(settings));
     } catch (error) {
@@ -85,7 +98,6 @@ export const useInventory = () => {
       setSettings(prev => ({...prev, ...newSettings}));
   }, []);
 
-  // All functions below now only modify the transactions array. The useEffect handles inventory recalculation.
   const addStock = useCallback((itemId: InventoryItemId, quantity: number, notes: string, orderNumber: string, date?: string) => {
     const item = ITEMS_MAP.get(itemId);
     if (!item) return;
@@ -102,22 +114,39 @@ export const useInventory = () => {
     setTransactions(prev => [newTransaction, ...prev]);
   }, []);
 
-  const logShipment = useCallback((productId: ProductId, cartonsShipped: number, orderNumber: string, date?: string) => {
+  const logProduction = useCallback((productId: ProductId, cartonsProduced: number, orderNumber: string, date?: string) => {
     const product = FINISHED_PRODUCTS.find(p => p.id === productId);
     if (!product) return;
 
     const newTransaction: Transaction = {
       id: new Date().toISOString() + Math.random(),
       date: date ? new Date(date).toISOString() : new Date().toISOString(),
-      type: 'OUT',
-      description: `Shipment: ${cartonsShipped} carton(s) of ${product.name} to ${product.customer}`,
-      details: [], // OUT transactions no longer store calculated details
+      type: 'PRODUCTION',
+      description: `Production: ${cartonsProduced} carton(s) of ${product.name}`,
+      details: [], // Calculated dynamically
       orderNumber: orderNumber || undefined,
       productId: productId,
-      cartonsShipped: cartonsShipped,
+      cartonsShipped: cartonsProduced, // Storing in cartonsShipped for compatibility, semantically 'cartonsAffected'
     };
 
     setTransactions(prev => [newTransaction, ...prev]);
+  }, []);
+
+  const logShipment = useCallback((productId: ProductId, cartonsShipped: number, orderNumber: string, date?: string) => {
+      const product = FINISHED_PRODUCTS.find(p => p.id === productId);
+      if (!product) return;
+
+      const newTransaction: Transaction = {
+          id: new Date().toISOString() + Math.random(),
+          date: date ? new Date(date).toISOString() : new Date().toISOString(),
+          type: 'SHIPMENT',
+          description: `Shipment: ${cartonsShipped} carton(s) of ${product.name} to ${product.customer}`,
+          details: [], 
+          orderNumber: orderNumber || undefined,
+          productId: productId,
+          cartonsShipped: cartonsShipped,
+      };
+      setTransactions(prev => [newTransaction, ...prev]);
   }, []);
     
     const deleteTransaction = useCallback((transactionId: string) => {
@@ -129,9 +158,16 @@ export const useInventory = () => {
     }, []);
 
   const exportData = useCallback(() => {
-    // Export only the sources of truth.
+    // Ensure export does not contain calculated details for PRODUCTION, only metadata.
+    const cleanTransactions = transactions.map(t => {
+        if (t.type === 'PRODUCTION' || t.type === 'OUT') {
+            return { ...t, details: [] };
+        }
+        return t;
+    });
+
     const data = {
-      transactions,
+      transactions: cleanTransactions,
       settings,
     };
     const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(data, null, 2))}`;
@@ -146,9 +182,12 @@ export const useInventory = () => {
     return new Promise((resolve, reject) => {
         try {
             const data = JSON.parse(jsonData);
-            // We only need to restore transactions and settings. Inventory will be derived.
             if (data.transactions) {
-                setTransactions(data.transactions);
+                // Migration on import as well
+                const migratedTransactions = data.transactions.map((t: Transaction) => 
+                    t.type === 'OUT' ? { ...t, type: 'PRODUCTION' } : t
+                );
+                setTransactions(migratedTransactions);
                 setSettings(mergeSettings(data.settings || {}));
                 resolve();
             } else {
@@ -160,5 +199,5 @@ export const useInventory = () => {
     });
   }, []);
 
-  return { inventory, transactions, settings, updateSettings, addStock, logShipment, exportData, importData, deleteTransaction, updateTransaction };
+  return { inventory, productInventory, transactions, settings, updateSettings, addStock, logProduction, logShipment, exportData, importData, deleteTransaction, updateTransaction };
 };

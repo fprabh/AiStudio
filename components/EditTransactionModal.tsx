@@ -1,5 +1,6 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { Transaction, InventoryItemId, ProductId, TransactionDetail } from '../types';
+
+import React, { useState, useMemo } from 'react';
+import { Transaction, InventoryItemId, ProductId } from '../types';
 import { useInventory } from '../hooks/useInventory';
 import { INVENTORY_ITEMS, FINISHED_PRODUCTS } from '../constants';
 import { calculateDeductions } from '../utils';
@@ -18,23 +19,24 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
         date: new Date(transaction.date).toISOString().split('T')[0],
         orderNumber: transaction.orderNumber || '',
         // Stock In specific
-        itemId: transaction.type === 'IN' ? transaction.details[0].itemId : '',
-        quantity: transaction.type === 'IN' ? transaction.details[0].quantity : 0,
+        itemId: transaction.type === 'IN' && transaction.details.length > 0 ? transaction.details[0].itemId : '',
+        quantity: transaction.type === 'IN' && transaction.details.length > 0 ? transaction.details[0].quantity : 0,
         notes: transaction.type === 'IN' ? transaction.description.match(/\((.*)\)/)?.[1] || '' : '',
-        // Shipment Out specific
+        // Production / Shipment specific
         productId: transaction.productId || '',
         cartonsShipped: transaction.cartonsShipped || 0,
     });
     
     const updatedDetails = useMemo(() => {
-        if (transaction.type === 'OUT' && formData.productId && formData.cartonsShipped > 0) {
+        if ((transaction.type === 'PRODUCTION' || transaction.type === 'OUT') && formData.productId && formData.cartonsShipped > 0) {
+            // Calculates raw material usage for Preview only
             return calculateDeductions(formData.productId as ProductId, formData.cartonsShipped, settings);
         } else if (transaction.type === 'IN' && formData.itemId && formData.quantity > 0) {
             const item = ITEMS_MAP.get(formData.itemId as InventoryItemId);
             if (!item) return [];
             return [{ itemId: item.id, itemName: item.name, quantity: formData.quantity }];
         }
-        return transaction.details || []; // Fallback for initial state or invalid form
+        return transaction.details || []; 
     }, [formData, settings, transaction.type, transaction.details]);
 
 
@@ -52,7 +54,9 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
         let description = '';
         if (transaction.type === 'IN' && item) {
              description = `Stock Received: ${item.name} ${formData.notes ? `(${formData.notes})` : ''}`
-        } else if (transaction.type === 'OUT' && product) {
+        } else if (transaction.type === 'PRODUCTION' && product) {
+            description = `Production: ${formData.cartonsShipped} carton(s) of ${product.name}`
+        } else if (transaction.type === 'SHIPMENT' && product) {
             description = `Shipment: ${formData.cartonsShipped} carton(s) of ${product.name} to ${product.customer}`
         }
 
@@ -60,10 +64,12 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
             ...transaction,
             date: new Date(formData.date).toISOString(),
             orderNumber: formData.orderNumber || undefined,
-            details: transaction.type === 'IN' ? updatedDetails : [],
+            // Only IN transactions store details persistently. 
+            // PRODUCTION and SHIPMENT details are calculated dynamically based on product/cartons and settings.
+            details: transaction.type === 'IN' ? updatedDetails : [], 
             description,
-            productId: formData.productId ? formData.productId as ProductId : undefined,
-            cartonsShipped: formData.cartonsShipped || undefined,
+            productId: (transaction.type === 'PRODUCTION' || transaction.type === 'SHIPMENT' || transaction.type === 'OUT') && formData.productId ? formData.productId as ProductId : undefined,
+            cartonsShipped: (transaction.type === 'PRODUCTION' || transaction.type === 'SHIPMENT' || transaction.type === 'OUT') ? formData.cartonsShipped : undefined,
         };
 
         onSave(updatedTransaction);
@@ -88,16 +94,16 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
         </>
     );
 
-    const renderShipmentOutForm = () => (
+    const renderProductForm = (label: string) => (
          <>
             <div>
-                <label className="block text-sm font-medium">Product Shipped</label>
+                <label className="block text-sm font-medium">Product</label>
                 <select name="productId" value={formData.productId} onChange={handleChange} className="mt-1 block w-full input-base" required>
                     {FINISHED_PRODUCTS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
             </div>
             <div>
-                <label className="block text-sm font-medium">Cartons Shipped</label>
+                <label className="block text-sm font-medium">{label}</label>
                 <input type="number" name="cartonsShipped" value={formData.cartonsShipped} onChange={handleChange} className="mt-1 block w-full input-base" min="1" required/>
             </div>
         </>
@@ -109,7 +115,9 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
                 <form onSubmit={handleSubmit} className="p-6 space-y-4">
                     <h3 className="text-xl font-bold">Edit Transaction</h3>
 
-                    {transaction.type === 'IN' ? renderStockInForm() : renderShipmentOutForm()}
+                    {transaction.type === 'IN' && renderStockInForm()}
+                    {(transaction.type === 'PRODUCTION' || transaction.type === 'OUT') && renderProductForm("Cartons Produced")}
+                    {transaction.type === 'SHIPMENT' && renderProductForm("Cartons Shipped")}
                     
                     <div className="grid grid-cols-2 gap-4">
                         <div>
@@ -122,19 +130,21 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
                         </div>
                     </div>
 
-                    <div className="pt-2">
-                        <h4 className="text-sm font-semibold mb-1">Updated Inventory Impact:</h4>
-                        <ul className="text-xs space-y-1 max-h-24 overflow-y-auto p-2 bg-gray-100 dark:bg-gray-700 rounded">
-                            {updatedDetails.map(d => (
-                                <li key={d.itemId} className="flex justify-between">
-                                    <span>{d.itemName}</span>
-                                    <span className={`font-mono ${d.quantity > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                       {d.quantity > 0 ? '+' : ''}{d.quantity % 1 !== 0 ? d.quantity.toFixed(4) : d.quantity.toLocaleString()}
-                                    </span>
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
+                    {(transaction.type === 'PRODUCTION' || transaction.type === 'OUT') && (
+                        <div className="pt-2">
+                            <h4 className="text-sm font-semibold mb-1">Material Deductions (Preview):</h4>
+                            <ul className="text-xs space-y-1 max-h-24 overflow-y-auto p-2 bg-gray-100 dark:bg-gray-700 rounded">
+                                {updatedDetails.map(d => (
+                                    <li key={d.itemId} className="flex justify-between">
+                                        <span>{d.itemName}</span>
+                                        <span className={`font-mono ${d.quantity > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                        {d.quantity > 0 ? '+' : ''}{d.quantity % 1 !== 0 ? d.quantity.toFixed(4) : d.quantity.toLocaleString()}
+                                        </span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
 
                     <div className="flex justify-end space-x-3 pt-4">
                         <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-200 dark:hover:bg-gray-500">

@@ -1,3 +1,4 @@
+
 export type InventoryItemId = 
   | 'meltblownFabric' | 'backLayerFabric' | 'outerLayerL1White' | 'outerLayerL1Blue' 
   | 'outerLayerL2Yellow' | 'outerLayerL2Blue' | 'outerLayerL3Pink' | 'outerLayerL3Blue'
@@ -9,7 +10,7 @@ export type InventoryItemId =
 export type Unit = 'rolls' | 'meters' | 'items';
 export type Category = 'Raw Materials' | 'Packaging Materials';
 export type Customer = 'PHSA' | 'PADM' | 'Alliance';
-export type View = 'dashboard' | 'inventory' | 'transactions' | 'addStock' | 'logShipment' | 'settings';
+export type View = 'dashboard' | 'inventory' | 'transactions' | 'addStock' | 'logProduction' | 'logShipment' | 'settings';
 
 export interface InventoryItem {
   id: InventoryItemId;
@@ -20,8 +21,9 @@ export interface InventoryItem {
 }
 
 export type InventoryState = Record<InventoryItemId, number>;
+export type ProductState = Record<ProductId, number>;
 
-export type TransactionType = 'IN' | 'OUT';
+export type TransactionType = 'IN' | 'OUT' | 'PRODUCTION' | 'SHIPMENT'; // Keeping OUT for legacy parsing safely
 
 export interface TransactionDetail {
   itemId: InventoryItemId;
@@ -36,9 +38,9 @@ export interface Transaction {
   description: string;
   details: TransactionDetail[];
   orderNumber?: string;
-  // For OUT transactions, to make editing easier
+  // For PRODUCTION and SHIPMENT
   productId?: ProductId;
-  cartonsShipped?: number;
+  cartonsShipped?: number; // Used for both produced count and shipped count
 }
 
 export type ProductId = 

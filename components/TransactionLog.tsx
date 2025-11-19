@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { Transaction } from '../types';
 import { useInventory } from '../hooks/useInventory';
@@ -58,6 +59,47 @@ const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, deleteTra
       setEditingTransaction(null);
   };
 
+  const getIcon = (type: Transaction['type']) => {
+      switch(type) {
+          case 'IN':
+              return <svg className="h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.707-10.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 001.414 1.414L9 9.414V13a1 1 0 102 0V9.414l1.293 1.293a1 1 0 001.414-1.414l-3-3z" clipRule="evenodd" /></svg>;
+          case 'PRODUCTION':
+              // Factory/Gear icon
+              return <svg className="h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.532 1.532 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.532 1.532 0 01.947-2.287c1.561-.379-1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" /></svg>;
+          case 'SHIPMENT':
+          case 'OUT':
+              // Truck icon
+              return <svg className="h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" /><path fillRule="evenodd" d="M3 4a2 2 0 00-2 2v5.5a3.5 3.5 0 003.5 3.5h9A3.5 3.5 0 0017 11.5V6a2 2 0 00-2-2H3zm12.5 7.5a2.5 2.5 0 00-2.5-2.5H3V6h12v5.5z" clipRule="evenodd" /><path d="M14 9H6V7h8v2z" /></svg>;
+      }
+  }
+
+  const getBadgeClass = (type: Transaction['type']) => {
+      switch(type) {
+          case 'IN': return 'bg-green-100 text-green-800';
+          case 'PRODUCTION': return 'bg-blue-100 text-blue-800';
+          case 'SHIPMENT': return 'bg-gray-100 text-gray-800';
+          default: return 'bg-gray-100 text-gray-800';
+      }
+  }
+  
+  const getBgClass = (type: Transaction['type']) => {
+      switch(type) {
+          case 'IN': return 'bg-green-500';
+          case 'PRODUCTION': return 'bg-blue-500';
+          case 'SHIPMENT': return 'bg-brand-dark';
+          default: return 'bg-gray-500';
+      }
+  }
+
+  const getLabel = (type: Transaction['type']) => {
+      switch(type) {
+          case 'IN': return 'Stock In';
+          case 'PRODUCTION': return 'Production';
+          case 'SHIPMENT': return 'Shipment Out';
+          default: return 'Transaction';
+      }
+  }
+
   return (
     <>
       {editingTransaction && (
@@ -116,7 +158,8 @@ const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, deleteTra
             <div className="flow-root">
               <ul className="-mb-8">
                 {sortedTransactions.map((transaction, transactionIdx) => {
-                  const detailsToDisplay = transaction.type === 'OUT' && transaction.productId && transaction.cartonsShipped
+                  // PRODUCTION consumes materials
+                  const detailsToDisplay = (transaction.type === 'PRODUCTION' || transaction.type === 'OUT') && transaction.productId && transaction.cartonsShipped
                     ? calculateDeductions(transaction.productId, transaction.cartonsShipped, settings)
                     : transaction.details;
 
@@ -128,11 +171,8 @@ const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, deleteTra
                       ) : null}
                       <div className="relative flex space-x-3 items-start">
                         <div>
-                          <span className={`h-8 w-8 rounded-full flex items-center justify-center ring-8 ring-gray-100 dark:ring-gray-900 ${transaction.type === 'IN' ? 'bg-green-500' : 'bg-brand-dark'}`}>
-                            {transaction.type === 'IN' ? 
-                              <svg className="h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.707-10.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 001.414 1.414L9 9.414V13a1 1 0 102 0V9.414l1.293 1.293a1 1 0 001.414-1.414l-3-3z" clipRule="evenodd" /></svg> :
-                              <svg className="h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm-.707-4.707a1 1 0 001.414-1.414l-3-3a1 1 0 00-1.414 1.414L9 10.586V7a1 1 0 10-2 0v3.586l-1.293-1.293a1 1 0 00-1.414 1.414l3 3z" clipRule="evenodd" /></svg>
-                            }
+                          <span className={`h-8 w-8 rounded-full flex items-center justify-center ring-8 ring-gray-100 dark:ring-gray-900 ${getBgClass(transaction.type)}`}>
+                            {getIcon(transaction.type)}
                           </span>
                         </div>
                         <div className="min-w-0 flex-1 bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4">
@@ -143,8 +183,8 @@ const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, deleteTra
                                 </p>
                                 <p className="mt-2 font-medium text-gray-900 dark:text-white">{transaction.description}</p>
                               </div>
-                              <span className={`flex-shrink-0 ml-4 px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${transaction.type === 'IN' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
-                                  {transaction.type === 'IN' ? 'Stock In' : 'Shipment Out'}
+                              <span className={`flex-shrink-0 ml-4 px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getBadgeClass(transaction.type)}`}>
+                                  {getLabel(transaction.type)}
                               </span>
                           </div>
                           
@@ -186,7 +226,7 @@ const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, deleteTra
                 <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
                     {transactions.length > 0 
                         ? `Your search for "${searchQuery}" did not match any transactions.`
-                        : 'Get started by adding stock or logging a shipment.'}
+                        : 'Get started by adding stock or logging production.'}
                 </p>
             </div>
         )}

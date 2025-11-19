@@ -1,4 +1,5 @@
-import { InventoryItem, Product, ProductId, DeductionRule, InventoryState, InventoryItemId } from './types';
+
+import { InventoryItem, Product, ProductId, DeductionRule, InventoryState, ProductState } from './types';
 
 export const INVENTORY_ITEMS: InventoryItem[] = [
   // Raw Materials
@@ -90,3 +91,8 @@ export const INITIAL_INVENTORY_STATE: InventoryState = INVENTORY_ITEMS.reduce((a
   acc[item.id] = 0;
   return acc;
 }, {} as InventoryState);
+
+export const INITIAL_PRODUCT_STATE: ProductState = FINISHED_PRODUCTS.reduce((acc, item) => {
+    acc[item.id] = 0;
+    return acc;
+}, {} as ProductState);

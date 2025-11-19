@@ -1,10 +1,12 @@
+
 import React from 'react';
-import { InventoryState, View, InventoryItemId, ProductId } from '../types';
+import { InventoryState, View, InventoryItemId, ProductId, ProductState } from '../types';
 import { INVENTORY_ITEMS, FINISHED_PRODUCTS, METERS_PER_ROLL } from '../constants';
 import { useInventory } from '../hooks/useInventory';
 
 type DashboardProps = {
   inventory: InventoryState;
+  productInventory?: ProductState; // Optional for backward compat
   setView: (view: View) => void;
   settings: ReturnType<typeof useInventory>['settings'];
 };
@@ -20,7 +22,6 @@ const calculateMaxPallets = (product: typeof FINISHED_PRODUCTS[0], inventory: In
     const requirementsPerPallet: Partial<Record<InventoryItemId, number>> = {};
     
     // Raw Materials
-    // FIX: Cast item from Object.values to InventoryItemId to fix typing errors.
     Object.values(rule.rawMaterials).forEach(unknownItemId => {
         const itemId = unknownItemId as InventoryItemId;
         if (settings.bypassedItems[itemId]) return;
@@ -54,7 +55,7 @@ const calculateMaxPallets = (product: typeof FINISHED_PRODUCTS[0], inventory: In
     return Math.max(0, Math.min(...possiblePalletsPerItem));
 };
 
-const Dashboard: React.FC<DashboardProps> = ({ inventory, setView, settings }) => {
+const Dashboard: React.FC<DashboardProps> = ({ inventory, productInventory, setView, settings }) => {
     const lowStockItems = INVENTORY_ITEMS
         .filter(item => {
             if (settings.bypassedItems[item.id]) {
@@ -82,7 +83,7 @@ const Dashboard: React.FC<DashboardProps> = ({ inventory, setView, settings }) =
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div className="bg-white dark:bg-gray-800 shadow-md rounded-lg p-4">
                 <h3 className="font-semibold text-red-600 dark:text-red-400 mb-2 border-b border-red-200 dark:border-red-800 pb-1">
-                    Low Stock
+                    Low Stock (Raw Materials)
                 </h3>
                 {lowStockItems.length > 0 ? (
                     <ul className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -105,7 +106,7 @@ const Dashboard: React.FC<DashboardProps> = ({ inventory, setView, settings }) =
                         })}
                     </ul>
                 ) : (
-                    <p className="text-sm text-gray-500 dark:text-gray-400 pt-2">No items are critically low.</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 pt-2">No raw materials are critically low.</p>
                 )}
             </div>
             <div className="bg-white dark:bg-gray-800 shadow-md rounded-lg p-4">
@@ -138,8 +139,40 @@ const Dashboard: React.FC<DashboardProps> = ({ inventory, setView, settings }) =
             </div>
         </div>
       </div>
+
+      {productInventory && (
       <div>
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Production Capacity</h2>
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Finished Goods Inventory</h2>
+         <div className="bg-white dark:bg-gray-800 shadow-md rounded-lg overflow-hidden">
+            <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                     <thead className="bg-gray-50 dark:bg-gray-700">
+                        <tr>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Product</th>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Customer</th>
+                            <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Cartons in Stock</th>
+                        </tr>
+                    </thead>
+                    <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                        {FINISHED_PRODUCTS.map(product => {
+                            const currentStock = productInventory[product.id] || 0;
+                            return (
+                            <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{product.name}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{product.customer}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 dark:text-white font-bold font-mono">{currentStock.toLocaleString()}</td>
+                            </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+      </div>
+      )}
+
+      <div>
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Theoretical Production Capacity</h2>
          <div className="bg-white dark:bg-gray-800 shadow-md rounded-lg overflow-hidden">
             <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
