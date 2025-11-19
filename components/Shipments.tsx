@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState } from 'react';
-import { Transaction, Customer } from '../types';
+import { Transaction, Customer, ProductState } from '../types';
 import { FINISHED_PRODUCTS } from '../constants';
 import { useInventory } from '../hooks/useInventory';
 import EditTransactionModal from './EditTransactionModal';
@@ -11,6 +11,7 @@ interface ShipmentsProps {
   updateTransaction: ReturnType<typeof useInventory>['updateTransaction'];
   deleteTransaction: ReturnType<typeof useInventory>['deleteTransaction'];
   settings: ReturnType<typeof useInventory>['settings'];
+  productInventory: ProductState;
 }
 
 type ShipmentTransaction = Transaction & { 
@@ -20,7 +21,7 @@ type ShipmentTransaction = Transaction & {
 type SortKey = 'date' | 'orderNumber' | 'productName' | 'cartonsShipped';
 type SortDirection = 'asc' | 'desc';
 
-const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, deleteTransaction, settings }) => {
+const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, deleteTransaction, settings, productInventory }) => {
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection }>({
     key: 'date',
     direction: 'desc',
@@ -51,7 +52,6 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
     // Create a display list combining original and pending updates
     transactions.filter(t => t.type === 'SHIPMENT' && t.productId).forEach(originalTx => {
         // If this ID is in pendingUpdates, we need to show BOTH the original (struck) and new (highlighted)
-        // unless the logic implies simple replacement. Prompt asked for "strike through previous data".
         
         const updatedTx = pendingUpdates.get(originalTx.id);
         const isDeleted = pendingDeletes.has(originalTx.id);
@@ -89,11 +89,6 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
     // Sort each group
     Object.keys(grouped).forEach(customer => {
       grouped[customer].sort((a, b) => {
-        // Always push deleted/modified-original to the bottom if they are annoying, 
-        // OR keep them in place. Sorting by date is usually best.
-        // However, let's keep the new item next to old if possible? 
-        // With date sorting, they will likely be close.
-        
         let comparison = 0;
         switch (sortConfig.key) {
           case 'date':
@@ -239,6 +234,7 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
                 onClose={() => setEditingTransaction(null)}
                 onSave={confirmEdit}
                 settings={settings}
+                productInventory={productInventory}
             />
         )}
         <ConfirmationModal 

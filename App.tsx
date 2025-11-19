@@ -37,6 +37,7 @@ const App: React.FC = () => {
                   updateTransaction={inventoryData.updateTransaction}
                   deleteTransaction={inventoryData.deleteTransaction}
                   settings={inventoryData.settings}
+                  productInventory={inventoryData.productInventory}
                />;
       case 'productionHistory':
         return <ProductionHistory 
