@@ -44,6 +44,7 @@ const App: React.FC = () => {
                   transactions={inventoryData.transactions} 
                   updateTransaction={inventoryData.updateTransaction}
                   deleteTransaction={inventoryData.deleteTransaction}
+                  addTransaction={inventoryData.addTransaction}
                   settings={inventoryData.settings}
                   inventory={inventoryData.inventory}
                />;

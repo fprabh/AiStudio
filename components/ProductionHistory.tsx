@@ -10,6 +10,7 @@ interface ProductionHistoryProps {
   transactions: Transaction[];
   updateTransaction: ReturnType<typeof useInventory>['updateTransaction'];
   deleteTransaction: ReturnType<typeof useInventory>['deleteTransaction'];
+  addTransaction: ReturnType<typeof useInventory>['addTransaction'];
   settings: ReturnType<typeof useInventory>['settings'];
   inventory: InventoryState;
 }
@@ -21,7 +22,7 @@ type ProductionTransaction = Transaction & {
 type SortKey = 'date' | 'orderNumber' | 'productName' | 'cartonsProduced';
 type SortDirection = 'asc' | 'desc';
 
-const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, updateTransaction, deleteTransaction, settings, inventory }) => {
+const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, updateTransaction, deleteTransaction, addTransaction, settings, inventory }) => {
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection }>({
     key: 'date',
     direction: 'desc',
@@ -31,6 +32,7 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
   const [isEditMode, setIsEditMode] = useState(false);
   const [pendingDeletes, setPendingDeletes] = useState<Set<string>>(new Set());
   const [pendingUpdates, setPendingUpdates] = useState<Map<string, Transaction>>(new Map());
+  const [pendingCreates, setPendingCreates] = useState<Transaction[]>([]);
   
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
@@ -82,6 +84,19 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
         }
       });
 
+    // Process entirely new transactions (from splits)
+    pendingCreates.forEach(newTx => {
+        const product = FINISHED_PRODUCTS.find(p => p.id === newTx.productId);
+        if (product) {
+             if (!grouped[product.customer]) grouped[product.customer] = [];
+             grouped[product.customer].push({
+                 ...newTx,
+                 productName: product.name,
+                 displayStatus: 'new'
+             });
+        }
+    });
+
     Object.keys(grouped).forEach(customer => {
       grouped[customer].sort((a, b) => {
         let comparison = 0;
@@ -104,14 +119,17 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
     });
 
     return grouped;
-  }, [transactions, sortConfig, pendingDeletes, pendingUpdates]);
+  }, [transactions, sortConfig, pendingDeletes, pendingUpdates, pendingCreates]);
 
   const initiateEdit = (tx: Transaction) => {
       setEditingTransaction(tx);
   };
   
-  const confirmEdit = (updatedTx: Transaction) => {
+  const confirmEdit = (updatedTx: Transaction, splitTx?: Transaction) => {
       setPendingUpdates(prev => new Map(prev).set(updatedTx.id, updatedTx));
+      if (splitTx) {
+          setPendingCreates(prev => [...prev, splitTx]);
+      }
       setEditingTransaction(null);
   };
 
@@ -148,10 +166,13 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
               return next;
           });
       }
+      if (pendingCreates.some(t => t.id === id)) {
+          setPendingCreates(prev => prev.filter(t => t.id !== id));
+      }
   };
 
   const initiateSave = () => {
-      if (pendingDeletes.size === 0 && pendingUpdates.size === 0) {
+      if (pendingDeletes.size === 0 && pendingUpdates.size === 0 && pendingCreates.length === 0) {
           setIsEditMode(false);
           return;
       }
@@ -161,9 +182,12 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
   const performSave = () => {
       pendingDeletes.forEach(id => deleteTransaction(id));
       pendingUpdates.forEach(tx => updateTransaction(tx));
+      pendingCreates.forEach(tx => addTransaction(tx));
+      
       setIsEditMode(false);
       setPendingDeletes(new Set());
       setPendingUpdates(new Map());
+      setPendingCreates([]);
       setShowSaveConfirmation(false);
   };
 
@@ -171,6 +195,7 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
       setIsEditMode(false);
       setPendingDeletes(new Set());
       setPendingUpdates(new Map());
+      setPendingCreates([]);
   };
 
   const renderSortIcon = (column: SortKey) => {
@@ -240,7 +265,7 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
             onClose={() => setShowSaveConfirmation(false)}
             onConfirm={performSave}
             title="Confirm Changes"
-            message={`You are about to delete ${pendingDeletes.size} record(s) and update ${pendingUpdates.size} record(s). This action cannot be undone.`}
+            message={`You are about to delete ${pendingDeletes.size}, update ${pendingUpdates.size}, and create ${pendingCreates.length} record(s). This action cannot be undone.`}
         />
 
       <div className="flex justify-between items-center">
@@ -265,7 +290,7 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
                         onClick={initiateSave}
                         className="px-4 py-2 bg-brand-red text-white rounded-md shadow-sm hover:bg-red-700 font-medium text-sm"
                     >
-                        Save Changes ({pendingDeletes.size + pendingUpdates.size})
+                        Save Changes ({pendingDeletes.size + pendingUpdates.size + pendingCreates.length})
                     </button>
                 </>
             )}

@@ -196,6 +196,11 @@ export const useInventory = () => {
     const updateTransaction = useCallback((updatedTx: Transaction) => {
         setTransactions(prev => prev.map(t => t.id === updatedTx.id ? updatedTx : t));
     }, []);
+    
+    // For raw inserts (e.g. splitting transactions)
+    const addTransaction = useCallback((transaction: Transaction) => {
+        setTransactions(prev => [transaction, ...prev]);
+    }, []);
 
   const exportData = useCallback(() => {
     // Ensure export does not contain calculated details for PRODUCTION or SHIPMENT, only metadata.
@@ -244,5 +249,5 @@ export const useInventory = () => {
     });
   }, []);
 
-  return { inventory, productInventory, transactions, settings, updateSettings, addStock, logProduction, logShipment, exportData, importData, deleteTransaction, updateTransaction };
+  return { inventory, productInventory, transactions, settings, updateSettings, addStock, logProduction, logShipment, exportData, importData, deleteTransaction, updateTransaction, addTransaction };
 };
