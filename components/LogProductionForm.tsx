@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
-import { ProductId, View, Customer, InventoryState, InventoryItemId } from '../types';
-import { FINISHED_PRODUCTS, METERS_PER_ROLL, INVENTORY_ITEMS } from '../constants';
+import { ProductId, View, Customer, InventoryState, InventoryItemId, AppSettings } from '../types';
+import { FINISHED_PRODUCTS, INVENTORY_ITEMS } from '../constants';
 import { useInventory } from '../hooks/useInventory';
 
 interface LogProductionFormProps {
@@ -12,6 +12,17 @@ interface LogProductionFormProps {
 }
 
 const ITEMS_MAP = new Map(INVENTORY_ITEMS.map(item => [item.id, item]));
+
+const getMasksPerRoll = (itemId: InventoryItemId, settings: AppSettings): number => {
+    if (itemId === 'meltblownFabric') return settings.materialUsage.masksPerRollMeltblown;
+    if (itemId === 'backLayerFabric') return settings.materialUsage.masksPerRollBackLayer;
+    if (itemId.startsWith('outerLayerL1')) return settings.materialUsage.masksPerRollOuterL1;
+    if (itemId.startsWith('outerLayerL2')) return settings.materialUsage.masksPerRollOuterL2;
+    if (itemId.startsWith('outerLayerL3')) return settings.materialUsage.masksPerRollOuterL3;
+    if (itemId === 'nosewire') return settings.materialUsage.masksPerRollNosewire;
+    if (itemId === 'elastic') return settings.materialUsage.masksPerRollElastic;
+    return 1; 
+};
 
 const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, setView, inventory, settings }) => {
   const [customer, setCustomer] = useState<Customer | ''>('');
@@ -40,12 +51,11 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
         const itemId = unknownItemId as InventoryItemId;
         const rejection = 1 + (settings.rejectionCoefficients[itemId] || 0) / 100;
         let requiredQty = 0;
-        if (itemId === 'nosewire') {
-            requiredQty = (totalMasks / settings.materialUsage.masksPerRollNosewire) * rejection;
-        } else if (itemId === 'elastic') {
-            requiredQty = (totalMasks / settings.materialUsage.masksPerRollElastic) * rejection;
-        } else if (ITEMS_MAP.get(itemId)?.unit === 'rolls') {
-            requiredQty = (totalMasks * settings.materialUsage.fabricPerMask / METERS_PER_ROLL) * rejection;
+        
+        const itemInfo = ITEMS_MAP.get(itemId);
+        if (itemInfo?.unit === 'rolls') {
+             const masksPerRoll = getMasksPerRoll(itemId, settings);
+             requiredQty = (totalMasks / masksPerRoll) * rejection;
         }
         deductions[itemId] = requiredQty;
     });

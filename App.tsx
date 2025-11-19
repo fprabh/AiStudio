@@ -6,6 +6,9 @@ import Header from './components/Header';
 import Dashboard from './components/Dashboard';
 import InventoryList from './components/InventoryList';
 import TransactionLog from './components/TransactionLog';
+import Shipments from './components/Shipments';
+import ProductionHistory from './components/ProductionHistory';
+import StockHistory from './components/StockHistory';
 import AddStockForm from './components/AddStockForm';
 import LogProductionForm from './components/LogProductionForm';
 import LogShipmentForm from './components/LogShipmentForm';
@@ -26,10 +29,30 @@ const App: React.FC = () => {
       case 'transactions':
         return <TransactionLog 
                   transactions={inventoryData.transactions}
-                  deleteTransaction={inventoryData.deleteTransaction}
-                  updateTransaction={inventoryData.updateTransaction}
                   settings={inventoryData.settings}
                 />;
+      case 'shipments':
+        return <Shipments 
+                  transactions={inventoryData.transactions} 
+                  updateTransaction={inventoryData.updateTransaction}
+                  deleteTransaction={inventoryData.deleteTransaction}
+                  settings={inventoryData.settings}
+               />;
+      case 'productionHistory':
+        return <ProductionHistory 
+                  transactions={inventoryData.transactions} 
+                  updateTransaction={inventoryData.updateTransaction}
+                  deleteTransaction={inventoryData.deleteTransaction}
+                  settings={inventoryData.settings}
+                  inventory={inventoryData.inventory}
+               />;
+      case 'stockHistory':
+        return <StockHistory 
+                  transactions={inventoryData.transactions} 
+                  updateTransaction={inventoryData.updateTransaction}
+                  deleteTransaction={inventoryData.deleteTransaction}
+                  settings={inventoryData.settings}
+               />;
       case 'addStock':
         return <AddStockForm addStock={inventoryData.addStock} setView={setView} />;
       case 'logProduction':

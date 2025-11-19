@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { View } from '../types';
 import { Theme } from '../hooks/useTheme';
 
@@ -10,14 +10,77 @@ interface HeaderProps {
   toggleTheme: () => void;
 }
 
-const NavButton: React.FC<{
+interface DropdownProps {
+    label: string;
+    icon: React.ReactElement;
+    active: boolean;
+    children: React.ReactNode;
+}
+
+const Dropdown: React.FC<DropdownProps> = ({ label, icon, active, children }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const dropdownRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+                setIsOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    return (
+        <div className="relative" ref={dropdownRef}>
+            <button
+                onClick={() => setIsOpen(!isOpen)}
+                className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 whitespace-nowrap ${
+                    active || isOpen
+                        ? 'bg-gray-100 dark:bg-gray-700 text-brand-dark dark:text-white'
+                        : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                }`}
+            >
+                {icon}
+                <span className="hidden sm:inline">{label}</span>
+                <svg className={`h-4 w-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+            </button>
+            {isOpen && (
+                <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 z-50 py-1">
+                    {children}
+                </div>
+            )}
+        </div>
+    );
+};
+
+const NavItem: React.FC<{
   label: string;
   viewName: View;
   currentView: View;
   onClick: (view: View) => void;
-  icon: React.ReactElement;
-}> = ({ label, viewName, currentView, onClick, icon }) => {
+  icon?: React.ReactElement;
+  isDropdownItem?: boolean;
+}> = ({ label, viewName, currentView, onClick, icon, isDropdownItem = false }) => {
   const isActive = currentView === viewName;
+  
+  if (isDropdownItem) {
+      return (
+          <button
+              onClick={() => onClick(viewName)}
+              className={`w-full text-left block px-4 py-2 text-sm ${
+                  isActive
+                      ? 'bg-brand-light dark:bg-gray-700 text-brand-red font-medium'
+                      : 'text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600'
+              }`}
+          >
+              {label}
+          </button>
+      )
+  }
+
   return (
     <button
       onClick={() => onClick(viewName)}
@@ -38,11 +101,9 @@ const Header: React.FC<HeaderProps> = ({ setView, currentView, theme, toggleThem
   const icons = {
       dashboard: <svg xmlns="http://www.w3.org/2000/svg" className={iconClass} viewBox="0 0 20 20" fill="currentColor"><path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z" /></svg>,
       inventory: <svg xmlns="http://www.w3.org/2000/svg" className={iconClass} viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" /></svg>,
-      transactions: <svg xmlns="http://www.w3.org/2000/svg" className={iconClass} viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" /></svg>,
+      reports: <svg xmlns="http://www.w3.org/2000/svg" className={iconClass} viewBox="0 0 20 20" fill="currentColor"><path d="M2 10a8 8 0 018-8v8h8a8 8 0 11-16 0z" /><path d="M12 2.252A8.014 8.014 0 0117.748 8H12V2.252z" /></svg>,
+      actions: <svg xmlns="http://www.w3.org/2000/svg" className={iconClass} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>,
       settings: <svg xmlns="http://www.w3.org/2000/svg" className={iconClass} viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.532 1.532 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.532 1.532 0 01.947-2.287c1.561-.379-1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" /></svg>,
-      addStock: <svg xmlns="http://www.w3.org/2000/svg" className={iconClass} viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" /></svg>,
-      logProduction: <svg xmlns="http://www.w3.org/2000/svg" className={iconClass} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>,
-      logShipment: <svg xmlns="http://www.w3.org/2000/svg" className={iconClass} viewBox="0 0 20 20" fill="currentColor"><path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" /><path fillRule="evenodd" d="M3 4a2 2 0 00-2 2v5.5a3.5 3.5 0 003.5 3.5h9A3.5 3.5 0 0017 11.5V6a2 2 0 00-2-2H3zm12.5 7.5a2.5 2.5 0 00-2.5-2.5H3V6h12v5.5z" clipRule="evenodd" /><path d="M14 9H6V7h8v2z" /></svg>
   };
 
   const sunIcon = (
@@ -57,25 +118,43 @@ const Header: React.FC<HeaderProps> = ({ setView, currentView, theme, toggleThem
     </svg>
   );
     
+  const isReportView = ['transactions', 'shipments', 'productionHistory', 'stockHistory'].includes(currentView);
+  const isActionView = ['addStock', 'logProduction', 'logShipment'].includes(currentView);
+
   return (
-    <header className="bg-white dark:bg-gray-800 shadow sticky top-0 z-10">
+    <header className="bg-white dark:bg-gray-800 shadow sticky top-0 z-20">
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-end h-16">
-          <div className="flex items-center">
+        <div className="flex items-center justify-between h-16">
+          <div className="flex items-center flex-1">
+            {/* Logo / Title Area could go here */}
             <nav className="flex items-center space-x-1 sm:space-x-2">
-               <div className="flex items-center space-x-2 mr-2 sm:mr-4 border-r border-gray-200 dark:border-gray-600 pr-2 sm:pr-4">
-                  <NavButton label="Add Stock" viewName="addStock" currentView={currentView} onClick={setView} icon={icons.addStock}/>
-                  <NavButton label="Log Production" viewName="logProduction" currentView={currentView} onClick={setView} icon={icons.logProduction}/>
-                  <NavButton label="Log Shipment" viewName="logShipment" currentView={currentView} onClick={setView} icon={icons.logShipment}/>
-               </div>
-               <NavButton label="Dashboard" viewName="dashboard" currentView={currentView} onClick={setView} icon={icons.dashboard}/>
-               <NavButton label="Inventory" viewName="inventory" currentView={currentView} onClick={setView} icon={icons.inventory}/>
-               <NavButton label="Transactions" viewName="transactions" currentView={currentView} onClick={setView} icon={icons.transactions}/>
-               <NavButton label="Settings" viewName="settings" currentView={currentView} onClick={setView} icon={icons.settings}/>
+                
+               <NavItem label="Dashboard" viewName="dashboard" currentView={currentView} onClick={setView} icon={icons.dashboard}/>
+               <NavItem label="Inventory" viewName="inventory" currentView={currentView} onClick={setView} icon={icons.inventory}/>
+               
+               <div className="h-6 w-px bg-gray-200 dark:bg-gray-600 mx-2"></div>
+
+               <Dropdown label="Reports" icon={icons.reports} active={isReportView}>
+                    <NavItem label="Incoming Stock" viewName="stockHistory" currentView={currentView} onClick={setView} isDropdownItem />
+                    <NavItem label="Production History" viewName="productionHistory" currentView={currentView} onClick={setView} isDropdownItem />
+                    <NavItem label="Shipment History" viewName="shipments" currentView={currentView} onClick={setView} isDropdownItem />
+                    <div className="border-t border-gray-100 dark:border-gray-700 my-1"></div>
+                    <NavItem label="All Transactions" viewName="transactions" currentView={currentView} onClick={setView} isDropdownItem />
+               </Dropdown>
+
+               <Dropdown label="Actions" icon={icons.actions} active={isActionView}>
+                   <NavItem label="Add Stock" viewName="addStock" currentView={currentView} onClick={setView} isDropdownItem />
+                   <NavItem label="Log Production" viewName="logProduction" currentView={currentView} onClick={setView} isDropdownItem />
+                   <NavItem label="Log Shipment" viewName="logShipment" currentView={currentView} onClick={setView} isDropdownItem />
+               </Dropdown>
             </nav>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <NavItem label="Settings" viewName="settings" currentView={currentView} onClick={setView} icon={icons.settings}/>
             <button
                 onClick={toggleTheme}
-                className="ml-4 p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-red transition-colors duration-200"
+                className="ml-2 p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-red transition-colors duration-200"
                 aria-label="Toggle theme"
             >
                 {theme === 'light' ? moonIcon : sunIcon}

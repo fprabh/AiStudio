@@ -1,7 +1,19 @@
+
 import { TransactionDetail, ProductId, InventoryItemId, AppSettings } from './types';
-import { FINISHED_PRODUCTS, INVENTORY_ITEMS, METERS_PER_ROLL } from './constants';
+import { FINISHED_PRODUCTS, INVENTORY_ITEMS } from './constants';
 
 const ITEMS_MAP = new Map(INVENTORY_ITEMS.map(item => [item.id, item]));
+
+const getMasksPerRoll = (itemId: InventoryItemId, settings: AppSettings): number => {
+    if (itemId === 'meltblownFabric') return settings.materialUsage.masksPerRollMeltblown;
+    if (itemId === 'backLayerFabric') return settings.materialUsage.masksPerRollBackLayer;
+    if (itemId.startsWith('outerLayerL1')) return settings.materialUsage.masksPerRollOuterL1;
+    if (itemId.startsWith('outerLayerL2')) return settings.materialUsage.masksPerRollOuterL2;
+    if (itemId.startsWith('outerLayerL3')) return settings.materialUsage.masksPerRollOuterL3;
+    if (itemId === 'nosewire') return settings.materialUsage.masksPerRollNosewire;
+    if (itemId === 'elastic') return settings.materialUsage.masksPerRollElastic;
+    return 1; // Should not happen for valid roll-based items
+};
 
 export const calculateDeductions = (productId: ProductId, cartonsShipped: number, settings: AppSettings): TransactionDetail[] => {
     const product = FINISHED_PRODUCTS.find(p => p.id === productId);
@@ -20,14 +32,8 @@ export const calculateDeductions = (productId: ProductId, cartonsShipped: number
         let quantity = 0;
         const itemInfo = ITEMS_MAP.get(itemId);
         if(itemInfo?.unit === 'rolls') {
-            if (itemId === 'nosewire') {
-                 quantity = totalMasks / settings.materialUsage.masksPerRollNosewire;
-            } else if (itemId === 'elastic') {
-                 quantity = totalMasks / settings.materialUsage.masksPerRollElastic;
-            } else {
-                 const fabricMetersUsed = totalMasks * settings.materialUsage.fabricPerMask;
-                 quantity = fabricMetersUsed / METERS_PER_ROLL;
-            }
+            const masksPerRoll = getMasksPerRoll(itemId, settings);
+            quantity = totalMasks / masksPerRoll;
         } 
         
         const rejectionRate = settings.rejectionCoefficients[itemId] || 0;

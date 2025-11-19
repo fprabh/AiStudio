@@ -12,14 +12,41 @@ const generateDefaultSettings = (): AppSettings => ({
     stockThresholds: INVENTORY_ITEMS.reduce((acc, item) => ({ ...acc, [item.id]: { low: 5, ideal: 15 } }), {} as Record<InventoryItemId, { low: number, ideal: number }>),
     productFormulas: DEDUCTION_RULES,
     materialUsage: {
-        fabricPerMask: 0.175,
+        masksPerRollMeltblown: 11428,
+        masksPerRollBackLayer: 11428,
+        masksPerRollOuterL1: 11428,
+        masksPerRollOuterL2: 11428,
+        masksPerRollOuterL3: 11428,
         masksPerRollNosewire: 15000,
         masksPerRollElastic: 6000,
     }
 });
 
-const mergeSettings = (loadedSettings: Partial<AppSettings>): AppSettings => {
+const mergeSettings = (loadedSettings: Partial<AppSettings> | any): AppSettings => {
     const defaultSettings = generateDefaultSettings();
+    
+    // Migration: Handle old settings format where fabricPerMask existed
+    let mergedMaterialUsage = { ...defaultSettings.materialUsage };
+    if (loadedSettings.materialUsage) {
+        // If old key exists and new ones don't, migrate roughly
+        if ('fabricPerMask' in loadedSettings.materialUsage && !('masksPerRollMeltblown' in loadedSettings.materialUsage)) {
+             const oldFabricPerMask = loadedSettings.materialUsage.fabricPerMask;
+             const calculated = oldFabricPerMask > 0 ? 2000 / oldFabricPerMask : 11428;
+             mergedMaterialUsage = {
+                 ...mergedMaterialUsage,
+                 masksPerRollMeltblown: calculated,
+                 masksPerRollBackLayer: calculated,
+                 masksPerRollOuterL1: calculated,
+                 masksPerRollOuterL2: calculated,
+                 masksPerRollOuterL3: calculated,
+                 masksPerRollNosewire: loadedSettings.materialUsage.masksPerRollNosewire || defaultSettings.materialUsage.masksPerRollNosewire,
+                 masksPerRollElastic: loadedSettings.materialUsage.masksPerRollElastic || defaultSettings.materialUsage.masksPerRollElastic,
+             };
+        } else {
+             mergedMaterialUsage = { ...mergedMaterialUsage, ...loadedSettings.materialUsage };
+        }
+    }
+
     return {
         ...defaultSettings,
         ...loadedSettings,
@@ -27,10 +54,11 @@ const mergeSettings = (loadedSettings: Partial<AppSettings>): AppSettings => {
         bypassedItems: { ...defaultSettings.bypassedItems, ...loadedSettings.bypassedItems },
         stockThresholds: { ...defaultSettings.stockThresholds, ...loadedSettings.stockThresholds },
         productFormulas: { ...defaultSettings.productFormulas, ...loadedSettings.productFormulas },
-        materialUsage: { ...defaultSettings.materialUsage, ...loadedSettings.materialUsage },
+        materialUsage: mergedMaterialUsage,
     };
 }
 
+const generateId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
 export const useInventory = () => {
   // Inventory state is now derived from transactions, not stored directly.
@@ -41,8 +69,20 @@ export const useInventory = () => {
     try {
       const saved = localStorage.getItem('transactions');
       const loaded = saved ? JSON.parse(saved) : [];
-      // Migration: Map legacy 'OUT' to 'PRODUCTION'
-      return loaded.map((t: Transaction) => t.type === 'OUT' ? { ...t, type: 'PRODUCTION' } : t);
+      
+      const uniqueIds = new Set();
+
+      // Migration: Map legacy 'OUT' to 'PRODUCTION' and Deduplicate IDs
+      return loaded.map((t: Transaction) => {
+          let mapped = t.type === 'OUT' ? { ...t, type: 'PRODUCTION' } : t;
+          
+          // Fix: Ensure unique IDs for existing data to prevent bulk deletion
+          if (uniqueIds.has(mapped.id)) {
+              mapped = { ...mapped, id: mapped.id + '-dup-' + Math.random().toString(36).substr(2, 5) };
+          }
+          uniqueIds.add(mapped.id);
+          return mapped;
+      });
     } catch (error) { return []; }
   });
 
@@ -103,7 +143,7 @@ export const useInventory = () => {
     if (!item) return;
 
     const newTransaction: Transaction = {
-      id: new Date().toISOString() + Math.random(),
+      id: generateId(),
       date: date ? new Date(date).toISOString() : new Date().toISOString(),
       type: 'IN',
       description: `Stock Received: ${item.name} ${notes ? `(${notes})` : ''}`,
@@ -119,14 +159,14 @@ export const useInventory = () => {
     if (!product) return;
 
     const newTransaction: Transaction = {
-      id: new Date().toISOString() + Math.random(),
+      id: generateId(),
       date: date ? new Date(date).toISOString() : new Date().toISOString(),
       type: 'PRODUCTION',
       description: `Production: ${cartonsProduced} carton(s) of ${product.name}`,
       details: [], // Calculated dynamically
       orderNumber: orderNumber || undefined,
       productId: productId,
-      cartonsShipped: cartonsProduced, // Storing in cartonsShipped for compatibility, semantically 'cartonsAffected'
+      cartonsShipped: cartonsProduced, 
     };
 
     setTransactions(prev => [newTransaction, ...prev]);
@@ -137,7 +177,7 @@ export const useInventory = () => {
       if (!product) return;
 
       const newTransaction: Transaction = {
-          id: new Date().toISOString() + Math.random(),
+          id: generateId(),
           date: date ? new Date(date).toISOString() : new Date().toISOString(),
           type: 'SHIPMENT',
           description: `Shipment: ${cartonsShipped} carton(s) of ${product.name} to ${product.customer}`,
@@ -158,9 +198,9 @@ export const useInventory = () => {
     }, []);
 
   const exportData = useCallback(() => {
-    // Ensure export does not contain calculated details for PRODUCTION, only metadata.
+    // Ensure export does not contain calculated details for PRODUCTION or SHIPMENT, only metadata.
     const cleanTransactions = transactions.map(t => {
-        if (t.type === 'PRODUCTION' || t.type === 'OUT') {
+        if (t.type === 'PRODUCTION' || t.type === 'OUT' || t.type === 'SHIPMENT') {
             return { ...t, details: [] };
         }
         return t;
@@ -183,10 +223,15 @@ export const useInventory = () => {
         try {
             const data = JSON.parse(jsonData);
             if (data.transactions) {
-                // Migration on import as well
-                const migratedTransactions = data.transactions.map((t: Transaction) => 
-                    t.type === 'OUT' ? { ...t, type: 'PRODUCTION' } : t
-                );
+                const uniqueIds = new Set();
+                const migratedTransactions = data.transactions.map((t: Transaction) => {
+                    let mapped = t.type === 'OUT' ? { ...t, type: 'PRODUCTION' } : t;
+                     if (uniqueIds.has(mapped.id)) {
+                        mapped = { ...mapped, id: mapped.id + '-dup-' + Math.random().toString(36).substr(2, 5) };
+                    }
+                    uniqueIds.add(mapped.id);
+                    return mapped;
+                });
                 setTransactions(migratedTransactions);
                 setSettings(mergeSettings(data.settings || {}));
                 resolve();

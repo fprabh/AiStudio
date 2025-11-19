@@ -2,22 +2,16 @@
 import React, { useState, useMemo } from 'react';
 import { Transaction } from '../types';
 import { useInventory } from '../hooks/useInventory';
-import EditTransactionModal from './EditTransactionModal';
-import ConfirmationModal from './ConfirmationModal';
 import { calculateDeductions } from '../utils';
 
 interface TransactionLogProps {
   transactions: Transaction[];
-  deleteTransaction: ReturnType<typeof useInventory>['deleteTransaction'];
-  updateTransaction: ReturnType<typeof useInventory>['updateTransaction'];
   settings: ReturnType<typeof useInventory>['settings'];
 }
 
-const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, deleteTransaction, updateTransaction, settings }) => {
+const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, settings }) => {
   const [sortBy, setSortBy] = useState<'recordDate' | 'transactionDate'>('recordDate');
   const [searchQuery, setSearchQuery] = useState('');
-  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
-  const [transactionToDelete, setTransactionToDelete] = useState<string | null>(null);
 
   const sortedTransactions = useMemo(() => {
     // Filter first
@@ -42,22 +36,6 @@ const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, deleteTra
     }
     return sorted;
   }, [transactions, sortBy, searchQuery]);
-
-  const handleDeleteRequest = (transactionId: string) => {
-    setTransactionToDelete(transactionId);
-  };
-
-  const handleConfirmDelete = () => {
-    if (transactionToDelete) {
-      deleteTransaction(transactionToDelete);
-      setTransactionToDelete(null);
-    }
-  };
-  
-  const handleUpdate = (updatedTx: Transaction) => {
-      updateTransaction(updatedTx);
-      setEditingTransaction(null);
-  };
 
   const getIcon = (type: Transaction['type']) => {
       switch(type) {
@@ -102,24 +80,9 @@ const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, deleteTra
 
   return (
     <>
-      {editingTransaction && (
-          <EditTransactionModal
-              transaction={editingTransaction}
-              onClose={() => setEditingTransaction(null)}
-              onSave={handleUpdate}
-              settings={settings}
-          />
-      )}
-      <ConfirmationModal
-        isOpen={!!transactionToDelete}
-        onClose={() => setTransactionToDelete(null)}
-        onConfirm={handleConfirmDelete}
-        title="Delete Transaction"
-        message="Are you sure you want to delete this transaction? This action cannot be undone."
-      />
       <div className="space-y-6">
         <div className="flex justify-between items-center flex-wrap gap-4">
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-white">Transaction Log</h2>
+          <h2 className="text-3xl font-bold text-gray-900 dark:text-white">Transaction Log (Read Only)</h2>
            <div className="flex items-center space-x-2 sm:space-x-4">
               <div>
                  <label htmlFor="search" className="sr-only">Search</label>
@@ -204,10 +167,6 @@ const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, deleteTra
                               </li>
                             ))}
                           </ul>
-                           <div className="mt-4 flex justify-end space-x-3">
-                                <button onClick={() => setEditingTransaction(transaction)} className="text-xs font-medium text-brand-red hover:text-red-800 dark:text-red-400 dark:hover:text-red-300">Edit</button>
-                                <button onClick={() => handleDeleteRequest(transaction.id)} className="text-xs font-medium text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300">Delete</button>
-                           </div>
                         </div>
                       </div>
                     </div>

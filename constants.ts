@@ -42,8 +42,6 @@ export const FINISHED_PRODUCTS: Product[] = [
   { id: 'allianceL3Blue', name: 'Alliance Level 3 Blue', customer: 'Alliance' },
 ];
 
-export const METERS_PER_ROLL = 2000;
-
 export const DEDUCTION_RULES: Record<ProductId, DeductionRule> = {
   phsaL3Blue: {
     boxesPerCarton: 20, masksPerBox: 50, cartonsPerPallet: 36,

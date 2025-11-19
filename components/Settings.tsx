@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { useInventory } from '../hooks/useInventory';
 import { INVENTORY_ITEMS, FINISHED_PRODUCTS } from '../constants';
@@ -115,19 +116,35 @@ const Settings: React.FC<SettingsProps> = ({ settings: initialSettings, updateSe
 
              {/* Material Usage Settings */}
             <div className="p-6 bg-white dark:bg-gray-800 rounded-lg shadow-md">
-                <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Material Usage / Capacity</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Material Capacity (Masks per Roll)</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     <div>
-                        <label htmlFor="fabricPerMask" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Fabric Usage (meters/mask)</label>
-                        <input id="fabricPerMask" type="number" step="0.001" className="w-full text-left bg-gray-100 dark:bg-gray-700 rounded p-1.5 mt-1 border-gray-300 focus:ring-brand-red focus:border-brand-red" value={localSettings.materialUsage.fabricPerMask} onChange={e => handleSettingsChange('materialUsage', 'fabricPerMask', '', parseFloat(e.target.value) || 0)} />
+                        <label htmlFor="masksPerRollMeltblown" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Meltblown Fabric</label>
+                        <input id="masksPerRollMeltblown" type="number" className="w-full text-left bg-gray-100 dark:bg-gray-700 rounded p-1.5 mt-1 border-gray-300 focus:ring-brand-red focus:border-brand-red" value={localSettings.materialUsage.masksPerRollMeltblown} onChange={e => handleSettingsChange('materialUsage', 'masksPerRollMeltblown', '', parseFloat(e.target.value) || 0)} />
                     </div>
                     <div>
-                        <label htmlFor="nosewirePerRoll" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Masks per Roll (Nosewire)</label>
-                        <input id="nosewirePerRoll" type="number" className="w-full text-left bg-gray-100 dark:bg-gray-700 rounded p-1.5 mt-1 border-gray-300 focus:ring-brand-red focus:border-brand-red" value={localSettings.materialUsage.masksPerRollNosewire} onChange={e => handleSettingsChange('materialUsage', 'masksPerRollNosewire', '', parseFloat(e.target.value) || 0)} />
+                        <label htmlFor="masksPerRollBackLayer" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Back Layer Fabric</label>
+                        <input id="masksPerRollBackLayer" type="number" className="w-full text-left bg-gray-100 dark:bg-gray-700 rounded p-1.5 mt-1 border-gray-300 focus:ring-brand-red focus:border-brand-red" value={localSettings.materialUsage.masksPerRollBackLayer} onChange={e => handleSettingsChange('materialUsage', 'masksPerRollBackLayer', '', parseFloat(e.target.value) || 0)} />
+                    </div>
+                     <div>
+                        <label htmlFor="masksPerRollOuterL1" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Outer Layer (L1)</label>
+                        <input id="masksPerRollOuterL1" type="number" className="w-full text-left bg-gray-100 dark:bg-gray-700 rounded p-1.5 mt-1 border-gray-300 focus:ring-brand-red focus:border-brand-red" value={localSettings.materialUsage.masksPerRollOuterL1} onChange={e => handleSettingsChange('materialUsage', 'masksPerRollOuterL1', '', parseFloat(e.target.value) || 0)} />
+                    </div>
+                     <div>
+                        <label htmlFor="masksPerRollOuterL2" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Outer Layer (L2)</label>
+                        <input id="masksPerRollOuterL2" type="number" className="w-full text-left bg-gray-100 dark:bg-gray-700 rounded p-1.5 mt-1 border-gray-300 focus:ring-brand-red focus:border-brand-red" value={localSettings.materialUsage.masksPerRollOuterL2} onChange={e => handleSettingsChange('materialUsage', 'masksPerRollOuterL2', '', parseFloat(e.target.value) || 0)} />
+                    </div>
+                     <div>
+                        <label htmlFor="masksPerRollOuterL3" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Outer Layer (L3)</label>
+                        <input id="masksPerRollOuterL3" type="number" className="w-full text-left bg-gray-100 dark:bg-gray-700 rounded p-1.5 mt-1 border-gray-300 focus:ring-brand-red focus:border-brand-red" value={localSettings.materialUsage.masksPerRollOuterL3} onChange={e => handleSettingsChange('materialUsage', 'masksPerRollOuterL3', '', parseFloat(e.target.value) || 0)} />
                     </div>
                     <div>
-                        <label htmlFor="elasticPerRoll" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Masks per Roll (Elastic)</label>
-                        <input id="elasticPerRoll" type="number" className="w-full text-left bg-gray-100 dark:bg-gray-700 rounded p-1.5 mt-1 border-gray-300 focus:ring-brand-red focus:border-brand-red" value={localSettings.materialUsage.masksPerRollElastic} onChange={e => handleSettingsChange('materialUsage', 'masksPerRollElastic', '', parseFloat(e.target.value) || 0)} />
+                        <label htmlFor="masksPerRollNosewire" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Nosewire</label>
+                        <input id="masksPerRollNosewire" type="number" className="w-full text-left bg-gray-100 dark:bg-gray-700 rounded p-1.5 mt-1 border-gray-300 focus:ring-brand-red focus:border-brand-red" value={localSettings.materialUsage.masksPerRollNosewire} onChange={e => handleSettingsChange('materialUsage', 'masksPerRollNosewire', '', parseFloat(e.target.value) || 0)} />
+                    </div>
+                    <div>
+                        <label htmlFor="masksPerRollElastic" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Elastic</label>
+                        <input id="masksPerRollElastic" type="number" className="w-full text-left bg-gray-100 dark:bg-gray-700 rounded p-1.5 mt-1 border-gray-300 focus:ring-brand-red focus:border-brand-red" value={localSettings.materialUsage.masksPerRollElastic} onChange={e => handleSettingsChange('materialUsage', 'masksPerRollElastic', '', parseFloat(e.target.value) || 0)} />
                     </div>
                 </div>
             </div>

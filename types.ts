@@ -10,7 +10,7 @@ export type InventoryItemId =
 export type Unit = 'rolls' | 'meters' | 'items';
 export type Category = 'Raw Materials' | 'Packaging Materials';
 export type Customer = 'PHSA' | 'PADM' | 'Alliance';
-export type View = 'dashboard' | 'inventory' | 'transactions' | 'addStock' | 'logProduction' | 'logShipment' | 'settings';
+export type View = 'dashboard' | 'inventory' | 'transactions' | 'shipments' | 'productionHistory' | 'stockHistory' | 'addStock' | 'logProduction' | 'logShipment' | 'settings';
 
 export interface InventoryItem {
   id: InventoryItemId;
@@ -76,7 +76,11 @@ export interface AppSettings {
     stockThresholds: Record<InventoryItemId, { low: number; ideal: number }>;
     productFormulas: Record<ProductId, DeductionRule>;
     materialUsage: {
-        fabricPerMask: number;
+        masksPerRollMeltblown: number;
+        masksPerRollBackLayer: number;
+        masksPerRollOuterL1: number;
+        masksPerRollOuterL2: number;
+        masksPerRollOuterL3: number;
         masksPerRollNosewire: number;
         masksPerRollElastic: number;
     };
