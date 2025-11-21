@@ -85,6 +85,27 @@ export const DEDUCTION_RULES: Record<ProductId, DeductionRule> = {
   },
 };
 
+export const LOT_CAPACITIES = {
+    LV1: 1759,
+    LV2: 879,
+    LV3_ALLIANCE: 1055,
+    LV3_PHSA_PADM: 527,
+};
+
+export type LotLevel = 'LV1' | 'LV2' | 'LV3';
+
+export const getProductLotConfig = (productId: ProductId): { level: LotLevel, maxCartons: number } => {
+    if (productId.includes('allianceL1')) return { level: 'LV1', maxCartons: LOT_CAPACITIES.LV1 };
+    if (productId.includes('allianceL2')) return { level: 'LV2', maxCartons: LOT_CAPACITIES.LV2 };
+    
+    if (productId.includes('allianceL3')) return { level: 'LV3', maxCartons: LOT_CAPACITIES.LV3_ALLIANCE };
+    if (productId === 'phsaL3Blue' || productId === 'padmL3Blue') return { level: 'LV3', maxCartons: LOT_CAPACITIES.LV3_PHSA_PADM };
+
+    // Fallback
+    return { level: 'LV3', maxCartons: 500 }; 
+};
+
+
 export const INITIAL_INVENTORY_STATE: InventoryState = INVENTORY_ITEMS.reduce((acc, item) => {
   acc[item.id] = 0;
   return acc;

@@ -10,7 +10,7 @@ export type InventoryItemId =
 export type Unit = 'rolls' | 'meters' | 'items';
 export type Category = 'Raw Materials' | 'Packaging Materials';
 export type Customer = 'PHSA' | 'PADM' | 'Alliance';
-export type View = 'dashboard' | 'inventory' | 'transactions' | 'shipments' | 'productionHistory' | 'stockHistory' | 'addStock' | 'logProduction' | 'logShipment' | 'settings';
+export type View = 'dashboard' | 'inventory' | 'transactions' | 'shipments' | 'productionHistory' | 'stockHistory' | 'lotHistory' | 'addStock' | 'logProduction' | 'logShipment' | 'settings';
 
 export interface InventoryItem {
   id: InventoryItemId;
@@ -75,6 +75,7 @@ export interface AppSettings {
     bypassedItems: Record<InventoryItemId, boolean>;
     stockThresholds: Record<InventoryItemId, { low: number; ideal: number }>;
     productFormulas: Record<ProductId, DeductionRule>;
+    lotSequences: Record<'LV1' | 'LV2' | 'LV3', number>;
     materialUsage: {
         masksPerRollMeltblown: number;
         masksPerRollBackLayer: number;

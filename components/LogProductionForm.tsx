@@ -1,7 +1,7 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { ProductId, View, Customer, InventoryState, InventoryItemId, AppSettings } from '../types';
-import { FINISHED_PRODUCTS, INVENTORY_ITEMS } from '../constants';
+import { FINISHED_PRODUCTS, INVENTORY_ITEMS, getProductLotConfig } from '../constants';
 import { useInventory } from '../hooks/useInventory';
 
 interface LogProductionFormProps {
@@ -9,6 +9,7 @@ interface LogProductionFormProps {
   setView: (view: View) => void;
   inventory: InventoryState;
   settings: ReturnType<typeof useInventory>['settings'];
+  updateSettings: ReturnType<typeof useInventory>['updateSettings'];
 }
 
 const ITEMS_MAP = new Map(INVENTORY_ITEMS.map(item => [item.id, item]));
@@ -24,16 +25,55 @@ const getMasksPerRoll = (itemId: InventoryItemId, settings: AppSettings): number
     return 1; 
 };
 
-const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, setView, inventory, settings }) => {
+const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, setView, inventory, settings, updateSettings }) => {
   const [customer, setCustomer] = useState<Customer | ''>('');
   const [productId, setProductId] = useState<ProductId | ''>('');
   const [cartons, setCartons] = useState<string>('');
   const [orderNumber, setOrderNumber] = useState<string>('');
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [lotBreakdown, setLotBreakdown] = useState<{ lotStr: string, lotsUsed: number, nextSequence: number, level: string } | null>(null);
 
   const availableProducts = useMemo(() => {
     return customer ? FINISHED_PRODUCTS.filter(p => p.customer === customer) : [];
   }, [customer]);
+
+  // Automatic Lot Number Generation
+  useEffect(() => {
+    if (productId && cartons && parseFloat(cartons) > 0) {
+        const config = getProductLotConfig(productId as ProductId);
+        const producedQty = parseFloat(cartons);
+        const startSequence = settings.lotSequences[config.level];
+        
+        const lotsRequired = Math.ceil(producedQty / config.maxCartons);
+        const breakdownParts: string[] = [];
+        let remainingQty = producedQty;
+        let currentSequence = startSequence;
+
+        for (let i = 0; i < lotsRequired; i++) {
+            const qtyInThisLot = Math.min(remainingQty, config.maxCartons);
+            breakdownParts.push(`${config.level} - ${currentSequence} (${qtyInThisLot} ctns)`);
+            remainingQty -= qtyInThisLot;
+            currentSequence++;
+        }
+
+        const generatedLotString = breakdownParts.join(', ');
+
+        setLotBreakdown({
+            lotStr: generatedLotString,
+            lotsUsed: lotsRequired,
+            nextSequence: currentSequence,
+            level: config.level
+        });
+        
+        // Auto-populate the Order Number field with the detailed breakdown
+        setOrderNumber(generatedLotString);
+
+    } else {
+        setLotBreakdown(null);
+        setOrderNumber('');
+    }
+  }, [productId, cartons, settings.lotSequences]);
+
 
   const deductionPreview = useMemo(() => {
     if (!productId || !cartons || parseFloat(cartons) <= 0) return null;
@@ -83,6 +123,17 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
     e.preventDefault();
     if (productId && cartons && parseFloat(cartons) > 0 && date) {
       logProduction(productId, parseFloat(cartons), orderNumber, date);
+      
+      // Update the lot sequence in settings
+      if (lotBreakdown) {
+          updateSettings({
+              lotSequences: {
+                  ...settings.lotSequences,
+                  [lotBreakdown.level]: lotBreakdown.nextSequence
+              }
+          });
+      }
+
       setView('transactions');
     } else {
       alert('Please fill all required fields.');
@@ -92,7 +143,7 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
   return (
     <div className="max-w-3xl mx-auto">
       <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">Log Production</h2>
-      <p className="mb-4 text-gray-600 dark:text-gray-400">Record finished goods produced. This will deduct raw materials from inventory and add to finished goods stock.</p>
+      <p className="mb-4 text-gray-600 dark:text-gray-400">Record finished goods produced. This will automatically assign Lot Numbers based on capacity limits (e.g. {lotBreakdown?.level ? lotBreakdown.level : 'LVx'} limits) and deduct raw materials.</p>
       <form onSubmit={handleSubmit} className="p-6 sm:p-8 space-y-6 bg-white dark:bg-gray-800 rounded-lg shadow-md">
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -120,16 +171,24 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
               <label htmlFor="date" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Production Date</label>
               <input type="date" id="date" value={date} onChange={e => setDate(e.target.value)} className="mt-1 block w-full pl-3 pr-3 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-red focus:border-brand-red sm:text-sm rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
             </div>
-            <div className="md:col-span-2">
-              <label htmlFor="orderNumber" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Batch / PO Number (Optional)</label>
-              <input 
-                type="text" 
+            
+            {/* Auto-Generated Lot Section */}
+             <div className="md:col-span-2">
+              <label htmlFor="orderNumber" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Batch / Lot Number(s)</label>
+              <textarea 
                 id="orderNumber" 
                 value={orderNumber} 
                 onChange={e => setOrderNumber(e.target.value)} 
-                className="mt-1 block w-full pl-3 pr-3 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-red focus:border-brand-red sm:text-sm rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white" 
-                placeholder="e.g., BATCH-001"
+                rows={2}
+                className="mt-1 block w-full pl-3 pr-3 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-red focus:border-brand-red sm:text-sm rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white font-mono" 
+                placeholder="Auto-generated..."
               />
+               {lotBreakdown && (
+                  <div className="mt-2 text-xs text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/50 p-2 rounded border border-gray-200 dark:border-gray-700">
+                      <span className="font-semibold">Capacity Logic:</span> Automatically split into lots based on max capacity per lot type.
+                      {lotBreakdown.lotsUsed > 1 && <div className="text-blue-600 dark:text-blue-400 mt-1 font-medium">Note: Production split across {lotBreakdown.lotsUsed} lots.</div>}
+                  </div>
+               )}
             </div>
         </div>
 

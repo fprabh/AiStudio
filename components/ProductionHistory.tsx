@@ -326,20 +326,20 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                     {production.map(t => (
                       <tr key={`${t.id}-${t.displayStatus}`} className={getRowStyle(t.displayStatus)}>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 align-top">
                           {new Date(t.date).toLocaleDateString()}
                         </td>
-                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 font-mono">
+                         <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-300 font-mono min-w-[200px] whitespace-normal break-words align-top">
                           {t.orderNumber || '-'}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white align-top">
                           {t.productName}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 dark:text-white font-bold font-mono">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 dark:text-white font-bold font-mono align-top">
                           {t.cartonsShipped?.toLocaleString()}
                         </td>
                         {isEditMode && (
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium align-top">
                                 {t.displayStatus === 'deleted' || t.displayStatus === 'modified-original' ? (
                                     <button onClick={() => undoChange(t.id)} className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300">Undo</button>
                                 ) : (

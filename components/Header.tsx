@@ -118,7 +118,7 @@ const Header: React.FC<HeaderProps> = ({ setView, currentView, theme, toggleThem
     </svg>
   );
     
-  const isReportView = ['transactions', 'shipments', 'productionHistory', 'stockHistory'].includes(currentView);
+  const isReportView = ['transactions', 'shipments', 'productionHistory', 'stockHistory', 'lotHistory'].includes(currentView);
   const isActionView = ['addStock', 'logProduction', 'logShipment'].includes(currentView);
 
   return (
@@ -135,9 +135,10 @@ const Header: React.FC<HeaderProps> = ({ setView, currentView, theme, toggleThem
                <div className="h-6 w-px bg-gray-200 dark:bg-gray-600 mx-2"></div>
 
                <Dropdown label="Reports" icon={icons.reports} active={isReportView}>
-                    <NavItem label="Incoming Stock" viewName="stockHistory" currentView={currentView} onClick={setView} isDropdownItem />
+                    <NavItem label="Lot History" viewName="lotHistory" currentView={currentView} onClick={setView} isDropdownItem />
                     <NavItem label="Production History" viewName="productionHistory" currentView={currentView} onClick={setView} isDropdownItem />
                     <NavItem label="Shipment History" viewName="shipments" currentView={currentView} onClick={setView} isDropdownItem />
+                    <NavItem label="Incoming Stock" viewName="stockHistory" currentView={currentView} onClick={setView} isDropdownItem />
                     <div className="border-t border-gray-100 dark:border-gray-700 my-1"></div>
                     <NavItem label="All Transactions" viewName="transactions" currentView={currentView} onClick={setView} isDropdownItem />
                </Dropdown>

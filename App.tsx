@@ -9,6 +9,7 @@ import TransactionLog from './components/TransactionLog';
 import Shipments from './components/Shipments';
 import ProductionHistory from './components/ProductionHistory';
 import StockHistory from './components/StockHistory';
+import LotHistory from './components/LotHistory';
 import AddStockForm from './components/AddStockForm';
 import LogProductionForm from './components/LogProductionForm';
 import LogShipmentForm from './components/LogShipmentForm';
@@ -56,10 +57,22 @@ const App: React.FC = () => {
                   settings={inventoryData.settings}
                   inventory={inventoryData.inventory}
                />;
+      case 'lotHistory':
+        return <LotHistory 
+                  transactions={inventoryData.transactions}
+                  settings={inventoryData.settings}
+                  updateTransaction={inventoryData.updateTransaction}
+                />;
       case 'addStock':
         return <AddStockForm addStock={inventoryData.addStock} setView={setView} />;
       case 'logProduction':
-        return <LogProductionForm logProduction={inventoryData.logProduction} setView={setView} inventory={inventoryData.inventory} settings={inventoryData.settings} />;
+        return <LogProductionForm 
+                  logProduction={inventoryData.logProduction} 
+                  setView={setView} 
+                  inventory={inventoryData.inventory} 
+                  settings={inventoryData.settings}
+                  updateSettings={inventoryData.updateSettings}
+               />;
       case 'logShipment':
         return <LogShipmentForm logShipment={inventoryData.logShipment} setView={setView} inventory={inventoryData.productInventory} settings={inventoryData.settings} />;
       case 'settings':

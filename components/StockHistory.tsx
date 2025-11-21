@@ -58,23 +58,24 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
          const isDeleted = pendingDeletes.has(originalTx.id);
 
          const processTx = (t: Transaction, status: StockTransaction['displayStatus']) => {
-             const detail = t.details[0];
-             const itemInfo = ITEMS_MAP.get(detail.itemId);
-             if(itemInfo) {
-                 // Grouping Logic: Group by Item Name for everything (Individual Tables)
-                 const groupKey = itemInfo.name;
+             // Iterate ALL details to ensure mixed transactions appear in all relevant tables
+             t.details.forEach(detail => {
+                 const itemInfo = ITEMS_MAP.get(detail.itemId);
+                 if(itemInfo) {
+                     const groupKey = itemInfo.name;
 
-                 if (!grouped[groupKey]) grouped[groupKey] = [];
+                     if (!grouped[groupKey]) grouped[groupKey] = [];
 
-                 grouped[groupKey].push({
-                     ...t,
-                     itemName: itemInfo.name,
-                     category: itemInfo.category,
-                     unit: itemInfo.unit,
-                     quantity: detail.quantity,
-                     displayStatus: status
-                 });
-             }
+                     grouped[groupKey].push({
+                         ...t,
+                         itemName: itemInfo.name,
+                         category: itemInfo.category,
+                         unit: itemInfo.unit,
+                         quantity: detail.quantity,
+                         displayStatus: status
+                     });
+                 }
+             });
          };
 
          // Process Original
@@ -112,6 +113,17 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
 
     return grouped;
   }, [transactions, sortConfig, pendingDeletes, pendingUpdates]);
+
+  const groupedInventory = useMemo(() => {
+    return INVENTORY_ITEMS.reduce((acc, item) => {
+      const cat = item.category;
+      const sub = item.subCategory;
+      if (!acc[cat]) acc[cat] = {};
+      if (!acc[cat][sub]) acc[cat][sub] = [];
+      acc[cat][sub].push(item);
+      return acc;
+    }, {} as Record<Category, Record<string, typeof INVENTORY_ITEMS>>);
+  }, []);
 
   const initiateEdit = (tx: Transaction) => {
       setEditingTransaction(tx);
@@ -279,85 +291,93 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
         </div>
       </div>
       
-      {INVENTORY_ITEMS.map((item) => {
-         const category = item.name;
-         const transactionsList = stockByCategory[category] || [];
-         // All tables are single item tables now
-         const isSingleItemTable = true;
-
-         return (
-            <div key={item.id} className="bg-white dark:bg-gray-800 shadow-md rounded-lg overflow-hidden mb-8">
-              <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 flex justify-between items-center">
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white">{category}</h3>
-                {transactionsList.length > 0 && (
-                     <span className="text-xs font-medium bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 px-2 py-1 rounded-full">
-                         {transactionsList.length} Records
-                     </span>
-                )}
-              </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                  <thead className="bg-gray-50 dark:bg-gray-800">
-                    <tr>
-                      <TableHeader label="Date" column="date" />
-                      <TableHeader label="Order / Ref #" column="orderNumber" />
-                      {!isSingleItemTable && <TableHeader label="Item Name" column="itemName" />}
-                      <TableHeader label="Quantity" column="quantity" align="right" />
-                      {isEditMode && <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>}
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {transactionsList.length > 0 ? (
-                        transactionsList.map(t => (
-                        <tr key={`${t.id}-${t.displayStatus}`} className={getRowStyle(t.displayStatus)}>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
-                            {new Date(t.date).toLocaleDateString()}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 font-mono">
-                            {t.orderNumber || '-'}
-                            </td>
-                            {!isSingleItemTable && (
-                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
-                                {t.itemName}
-                                <div className="text-xs text-gray-400 font-normal">{t.description.match(/\((.*)\)/)?.[1]}</div>
-                                </td>
-                            )}
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 dark:text-white font-bold font-mono">
-                            {t.quantity.toLocaleString()} <span className="text-xs text-gray-500 font-normal">{t.unit}</span>
-                            {isSingleItemTable && t.description.match(/\((.*)\)/)?.[1] && (
-                                <div className="text-xs text-gray-400 font-normal mt-1">{t.description.match(/\((.*)\)/)?.[1]}</div>
-                            )}
-                            </td>
-                            {isEditMode && (
-                                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                    {t.displayStatus === 'deleted' || t.displayStatus === 'modified-original' ? (
-                                        <button onClick={() => undoChange(t.id)} className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300">Undo</button>
-                                    ) : (
-                                        <div className="flex justify-end space-x-3">
-                                            {t.displayStatus === 'new' && (
-                                                <button onClick={() => undoChange(t.id)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400">Revert</button>
+      {Object.entries(groupedInventory).map(([category, subCategories]) => (
+        <div key={category} className="space-y-8">
+             <h2 className="text-2xl font-bold text-gray-800 dark:text-white sticky top-16 bg-gray-50 dark:bg-gray-900 py-2 z-10 border-b border-gray-200 dark:border-gray-700">{category}</h2>
+             
+             {Object.entries(subCategories)
+                .sort(([subA], [subB]) => subA.localeCompare(subB))
+                .map(([subCategory, items]) => (
+                <div key={subCategory} className="pl-4 border-l-2 border-gray-200 dark:border-gray-700">
+                     <h3 className="text-lg font-semibold text-gray-600 dark:text-gray-300 mb-6">{subCategory}</h3>
+                     
+                     <div className="space-y-10">
+                     {items
+                        .sort((a, b) => a.name.localeCompare(b.name))
+                        .map(item => {
+                            const transactionsList = stockByCategory[item.name] || [];
+                            
+                            return (
+                                <div key={item.id} className="bg-white dark:bg-gray-800 shadow-md rounded-lg overflow-hidden">
+                                    <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 flex justify-between items-center">
+                                        <h3 className="text-xl font-bold text-gray-900 dark:text-white">{item.name}</h3>
+                                        {transactionsList.length > 0 && (
+                                            <span className="text-xs font-medium bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 px-2 py-1 rounded-full">
+                                                {transactionsList.length} Records
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="overflow-x-auto">
+                                        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                        <thead className="bg-gray-50 dark:bg-gray-800">
+                                            <tr>
+                                            <TableHeader label="Date" column="date" />
+                                            <TableHeader label="Order / Ref #" column="orderNumber" />
+                                            <TableHeader label="Quantity" column="quantity" align="right" />
+                                            {isEditMode && <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>}
+                                            </tr>
+                                        </thead>
+                                        <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                            {transactionsList.length > 0 ? (
+                                                transactionsList.map(t => (
+                                                <tr key={`${t.id}-${t.displayStatus}`} className={getRowStyle(t.displayStatus)}>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
+                                                    {new Date(t.date).toLocaleDateString()}
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 font-mono">
+                                                    {t.orderNumber || '-'}
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 dark:text-white font-bold font-mono">
+                                                    {t.quantity.toLocaleString()} <span className="text-xs text-gray-500 font-normal">{t.unit}</span>
+                                                    {t.description.match(/\((.*)\)/)?.[1] && (
+                                                        <div className="text-xs text-gray-400 font-normal mt-1">{t.description.match(/\((.*)\)/)?.[1]}</div>
+                                                    )}
+                                                    </td>
+                                                    {isEditMode && (
+                                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                                            {t.displayStatus === 'deleted' || t.displayStatus === 'modified-original' ? (
+                                                                <button onClick={() => undoChange(t.id)} className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300">Undo</button>
+                                                            ) : (
+                                                                <div className="flex justify-end space-x-3">
+                                                                    {t.displayStatus === 'new' && (
+                                                                        <button onClick={() => undoChange(t.id)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400">Revert</button>
+                                                                    )}
+                                                                    <button onClick={() => initiateEdit(t)} className="text-brand-red hover:text-red-900 dark:text-red-400 dark:hover:text-red-300">Edit</button>
+                                                                    <button onClick={() => initiateDelete(t.id)} className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200">Delete</button>
+                                                                </div>
+                                                            )}
+                                                        </td>
+                                                    )}
+                                                </tr>
+                                                ))
+                                            ) : (
+                                                <tr>
+                                                    <td colSpan={isEditMode ? 4 : 3} className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400 italic">
+                                                        No incoming stock history recorded.
+                                                    </td>
+                                                </tr>
                                             )}
-                                            <button onClick={() => initiateEdit(t)} className="text-brand-red hover:text-red-900 dark:text-red-400 dark:hover:text-red-300">Edit</button>
-                                            <button onClick={() => initiateDelete(t.id)} className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200">Delete</button>
-                                        </div>
-                                    )}
-                                </td>
-                            )}
-                        </tr>
-                        ))
-                    ) : (
-                        <tr>
-                            <td colSpan={isEditMode ? 4 : 3} className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400 italic">
-                                No incoming stock history recorded.
-                            </td>
-                        </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-         );
-      })}
+                                        </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                     </div>
+                </div>
+             ))}
+        </div>
+      ))}
     </div>
   );
 };

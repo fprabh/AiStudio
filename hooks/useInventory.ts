@@ -11,6 +11,7 @@ const generateDefaultSettings = (): AppSettings => ({
     bypassedItems: INVENTORY_ITEMS.reduce((acc, item) => ({ ...acc, [item.id]: false }), {} as Record<InventoryItemId, boolean>),
     stockThresholds: INVENTORY_ITEMS.reduce((acc, item) => ({ ...acc, [item.id]: { low: 5, ideal: 15 } }), {} as Record<InventoryItemId, { low: number, ideal: number }>),
     productFormulas: DEDUCTION_RULES,
+    lotSequences: { 'LV1': 10000, 'LV2': 10000, 'LV3': 10000 },
     materialUsage: {
         masksPerRollMeltblown: 11428,
         masksPerRollBackLayer: 11428,
@@ -54,6 +55,7 @@ const mergeSettings = (loadedSettings: Partial<AppSettings> | any): AppSettings 
         bypassedItems: { ...defaultSettings.bypassedItems, ...loadedSettings.bypassedItems },
         stockThresholds: { ...defaultSettings.stockThresholds, ...loadedSettings.stockThresholds },
         productFormulas: { ...defaultSettings.productFormulas, ...loadedSettings.productFormulas },
+        lotSequences: { ...defaultSettings.lotSequences, ...loadedSettings.lotSequences },
         materialUsage: mergedMaterialUsage,
     };
 }
