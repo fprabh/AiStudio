@@ -10,7 +10,8 @@ export type InventoryItemId =
 export type Unit = 'rolls' | 'meters' | 'items';
 export type Category = 'Raw Materials' | 'Packaging Materials';
 export type Customer = 'PHSA' | 'PADM' | 'Alliance';
-export type View = 'dashboard' | 'inventory' | 'transactions' | 'shipments' | 'productionHistory' | 'stockHistory' | 'lotHistory' | 'addStock' | 'logProduction' | 'logShipment' | 'settings';
+export type View = 'dashboard' | 'inventory' | 'transactions' | 'shipments' | 'productionHistory' | 'stockHistory' | 'addStock' | 'logProduction' | 'logShipment' | 'settings' | 'lotHistory';
+export type LotLevel = 'LV1' | 'LV2' | 'LV3';
 
 export interface InventoryItem {
   id: InventoryItemId;
@@ -22,6 +23,7 @@ export interface InventoryItem {
 
 export type InventoryState = Record<InventoryItemId, number>;
 export type ProductState = Record<ProductId, number>;
+export type LotState = Record<string, number>; // LotNumber -> Remaining Cartons
 
 export type TransactionType = 'IN' | 'OUT' | 'PRODUCTION' | 'SHIPMENT'; // Keeping OUT for legacy parsing safely
 
@@ -41,6 +43,10 @@ export interface Transaction {
   // For PRODUCTION and SHIPMENT
   productId?: ProductId;
   cartonsShipped?: number; // Used for both produced count and shipped count
+  // For SHIPMENT - Track which lots were used
+  lotAllocations?: Record<string, number>; // LotNumber -> Quantity Used
+  // For PRODUCTION - Track which Raw Material Stock IDs were used
+  materialLinkage?: Partial<Record<InventoryItemId, string>>; // ItemId -> StockID
 }
 
 export type ProductId = 
@@ -75,7 +81,8 @@ export interface AppSettings {
     bypassedItems: Record<InventoryItemId, boolean>;
     stockThresholds: Record<InventoryItemId, { low: number; ideal: number }>;
     productFormulas: Record<ProductId, DeductionRule>;
-    lotSequences: Record<'LV1' | 'LV2' | 'LV3', number>;
+    lotSequences: Record<LotLevel, number>;
+    lotSizeMaskBoxes: number; // Default 10080
     materialUsage: {
         masksPerRollMeltblown: number;
         masksPerRollBackLayer: number;

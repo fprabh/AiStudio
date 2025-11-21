@@ -135,7 +135,7 @@ const Header: React.FC<HeaderProps> = ({ setView, currentView, theme, toggleThem
                <div className="h-6 w-px bg-gray-200 dark:bg-gray-600 mx-2"></div>
 
                <Dropdown label="Reports" icon={icons.reports} active={isReportView}>
-                    <NavItem label="Lot History" viewName="lotHistory" currentView={currentView} onClick={setView} isDropdownItem />
+                    <NavItem label="Lot Traceability" viewName="lotHistory" currentView={currentView} onClick={setView} isDropdownItem />
                     <NavItem label="Production History" viewName="productionHistory" currentView={currentView} onClick={setView} isDropdownItem />
                     <NavItem label="Shipment History" viewName="shipments" currentView={currentView} onClick={setView} isDropdownItem />
                     <NavItem label="Incoming Stock" viewName="stockHistory" currentView={currentView} onClick={setView} isDropdownItem />

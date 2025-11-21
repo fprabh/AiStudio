@@ -3,8 +3,8 @@ import React, { useMemo, useState } from 'react';
 import { Transaction, Customer, InventoryState } from '../types';
 import { FINISHED_PRODUCTS } from '../constants';
 import { useInventory } from '../hooks/useInventory';
-import EditTransactionModal from './EditTransactionModal';
 import ConfirmationModal from './ConfirmationModal';
+import EditTransactionModal from './EditTransactionModal';
 
 interface ProductionHistoryProps {
   transactions: Transaction[];
@@ -17,26 +17,20 @@ interface ProductionHistoryProps {
 
 type ProductionTransaction = Transaction & { 
     productName: string;
-    displayStatus?: 'normal' | 'deleted' | 'modified-original' | 'new';
 };
 type SortKey = 'date' | 'orderNumber' | 'productName' | 'cartonsProduced';
 type SortDirection = 'asc' | 'desc';
 
-const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, updateTransaction, deleteTransaction, addTransaction, settings, inventory }) => {
+const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, updateTransaction, deleteTransaction, settings, inventory }) => {
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection }>({
     key: 'date',
     direction: 'desc',
   });
 
-  // Edit Mode State
-  const [isEditMode, setIsEditMode] = useState(false);
-  const [pendingDeletes, setPendingDeletes] = useState<Set<string>>(new Set());
-  const [pendingUpdates, setPendingUpdates] = useState<Map<string, Transaction>>(new Map());
-  const [pendingCreates, setPendingCreates] = useState<Transaction[]>([]);
-  
+  // Mode State
+  const [isManageMode, setIsManageMode] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
-  const [showSaveConfirmation, setShowSaveConfirmation] = useState(false);
 
   const handleSort = (key: SortKey) => {
     setSortConfig((current) => ({
@@ -52,50 +46,16 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
 
     transactions
       .filter(t => (t.type === 'PRODUCTION' || t.type === 'OUT') && t.productId)
-      .forEach(originalTx => {
-        const updatedTx = pendingUpdates.get(originalTx.id);
-        const isDeleted = pendingDeletes.has(originalTx.id);
-
-        const originalProduct = FINISHED_PRODUCTS.find(p => p.id === originalTx.productId);
-        if (originalProduct) {
-            if (!grouped[originalProduct.customer]) grouped[originalProduct.customer] = [];
-            
-            let status: ProductionTransaction['displayStatus'] = 'normal';
-            if (isDeleted) status = 'deleted';
-            else if (updatedTx) status = 'modified-original';
-
-            grouped[originalProduct.customer].push({
-                ...originalTx,
-                productName: originalProduct.name,
-                displayStatus: status
+      .forEach(tx => {
+        const product = FINISHED_PRODUCTS.find(p => p.id === tx.productId);
+        if (product) {
+            if (!grouped[product.customer]) grouped[product.customer] = [];
+            grouped[product.customer].push({
+                ...tx,
+                productName: product.name,
             });
         }
-
-        if (updatedTx) {
-            const updatedProduct = FINISHED_PRODUCTS.find(p => p.id === updatedTx.productId);
-            if (updatedProduct) {
-                if (!grouped[updatedProduct.customer]) grouped[updatedProduct.customer] = [];
-                grouped[updatedProduct.customer].push({
-                    ...updatedTx,
-                    productName: updatedProduct.name,
-                    displayStatus: 'new'
-                });
-            }
-        }
       });
-
-    // Process entirely new transactions (from splits)
-    pendingCreates.forEach(newTx => {
-        const product = FINISHED_PRODUCTS.find(p => p.id === newTx.productId);
-        if (product) {
-             if (!grouped[product.customer]) grouped[product.customer] = [];
-             grouped[product.customer].push({
-                 ...newTx,
-                 productName: product.name,
-                 displayStatus: 'new'
-             });
-        }
-    });
 
     Object.keys(grouped).forEach(customer => {
       grouped[customer].sort((a, b) => {
@@ -119,83 +79,18 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
     });
 
     return grouped;
-  }, [transactions, sortConfig, pendingDeletes, pendingUpdates, pendingCreates]);
+  }, [transactions, sortConfig]);
 
-  const initiateEdit = (tx: Transaction) => {
-      setEditingTransaction(tx);
-  };
-  
-  const confirmEdit = (updatedTx: Transaction, splitTx?: Transaction) => {
-      setPendingUpdates(prev => new Map(prev).set(updatedTx.id, updatedTx));
-      if (splitTx) {
-          setPendingCreates(prev => [...prev, splitTx]);
-      }
+  const confirmEdit = (updatedTx: Transaction) => {
+      updateTransaction(updatedTx);
       setEditingTransaction(null);
-  };
-
-  const initiateDelete = (id: string) => {
-      setItemToDelete(id);
   };
 
   const confirmDelete = () => {
       if (itemToDelete) {
-          setPendingDeletes(prev => new Set(prev).add(itemToDelete));
-          if (pendingUpdates.has(itemToDelete)) {
-              setPendingUpdates(prev => {
-                  const next = new Map(prev);
-                  next.delete(itemToDelete);
-                  return next;
-              });
-          }
+          deleteTransaction(itemToDelete);
           setItemToDelete(null);
       }
-  };
-
-  const undoChange = (id: string) => {
-      if (pendingDeletes.has(id)) {
-          setPendingDeletes(prev => {
-              const next = new Set(prev);
-              next.delete(id);
-              return next;
-          });
-      }
-      if (pendingUpdates.has(id)) {
-          setPendingUpdates(prev => {
-              const next = new Map(prev);
-              next.delete(id);
-              return next;
-          });
-      }
-      if (pendingCreates.some(t => t.id === id)) {
-          setPendingCreates(prev => prev.filter(t => t.id !== id));
-      }
-  };
-
-  const initiateSave = () => {
-      if (pendingDeletes.size === 0 && pendingUpdates.size === 0 && pendingCreates.length === 0) {
-          setIsEditMode(false);
-          return;
-      }
-      setShowSaveConfirmation(true);
-  };
-
-  const performSave = () => {
-      pendingDeletes.forEach(id => deleteTransaction(id));
-      pendingUpdates.forEach(tx => updateTransaction(tx));
-      pendingCreates.forEach(tx => addTransaction(tx));
-      
-      setIsEditMode(false);
-      setPendingDeletes(new Set());
-      setPendingUpdates(new Map());
-      setPendingCreates([]);
-      setShowSaveConfirmation(false);
-  };
-
-  const cancelAllChanges = () => {
-      setIsEditMode(false);
-      setPendingDeletes(new Set());
-      setPendingUpdates(new Map());
-      setPendingCreates([]);
   };
 
   const renderSortIcon = (column: SortKey) => {
@@ -232,16 +127,6 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
     </th>
   );
 
-  const getRowStyle = (status?: ProductionTransaction['displayStatus']) => {
-      if (status === 'deleted' || status === 'modified-original') {
-          return "bg-gray-50 dark:bg-gray-800 opacity-60 text-gray-400 line-through hover:bg-gray-100";
-      }
-      if (status === 'new') {
-          return "bg-green-50 dark:bg-green-900/20 border-l-2 border-green-500";
-      }
-      return "hover:bg-gray-50 dark:hover:bg-gray-700/50";
-  };
-
   return (
     <div className="space-y-8">
         {editingTransaction && (
@@ -251,58 +136,33 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
                 onSave={confirmEdit}
                 settings={settings}
                 inventory={inventory}
+                transactions={transactions} // Pass full history for lot checks
             />
         )}
         <ConfirmationModal 
             isOpen={!!itemToDelete}
             onClose={() => setItemToDelete(null)}
             onConfirm={confirmDelete}
-            title="Mark for Deletion"
-            message="Are you sure you want to mark this record for deletion? You must click 'Save Changes' to apply."
-        />
-        <ConfirmationModal 
-            isOpen={showSaveConfirmation}
-            onClose={() => setShowSaveConfirmation(false)}
-            onConfirm={performSave}
-            title="Confirm Changes"
-            message={`You are about to delete ${pendingDeletes.size}, update ${pendingUpdates.size}, and create ${pendingCreates.length} record(s). This action cannot be undone.`}
+            title="Delete Production Record"
+            message="Are you sure you want to delete this production record? This will revert the stock deductions."
         />
 
       <div className="flex justify-between items-center">
         <h2 className="text-3xl font-bold text-gray-900 dark:text-white">Production History</h2>
         <div className="space-x-4">
-            {!isEditMode ? (
-                <button 
-                    onClick={() => setIsEditMode(true)}
-                    className="px-4 py-2 bg-white border border-gray-300 dark:bg-gray-700 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-md shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 font-medium text-sm"
-                >
-                    Edit Table
-                </button>
-            ) : (
-                <>
-                    <button 
-                        onClick={cancelAllChanges}
-                        className="px-4 py-2 bg-white border border-gray-300 dark:bg-gray-700 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-md shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 font-medium text-sm"
-                    >
-                        Cancel
-                    </button>
-                    <button 
-                        onClick={initiateSave}
-                        className="px-4 py-2 bg-brand-red text-white rounded-md shadow-sm hover:bg-red-700 font-medium text-sm"
-                    >
-                        Save Changes ({pendingDeletes.size + pendingUpdates.size + pendingCreates.length})
-                    </button>
-                </>
-            )}
+             <button 
+                onClick={() => setIsManageMode(!isManageMode)}
+                className={`px-4 py-2 border rounded-md shadow-sm font-medium text-sm transition-colors ${isManageMode ? 'bg-brand-dark text-white border-brand-dark' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-200 dark:border-gray-600 dark:hover:bg-gray-600'}`}
+            >
+                {isManageMode ? 'Done Managing' : 'Manage Records'}
+            </button>
         </div>
       </div>
       
       {Object.entries(productionByCustomer).map(([customer, customerProduction]) => {
-         const production = customerProduction as ProductionTransaction[];
-         const activeProduction = production.filter(s => s.displayStatus !== 'deleted' && s.displayStatus !== 'modified-original');
-         const totalCartons = activeProduction.reduce((sum, t) => sum + (t.cartonsShipped || 0), 0);
+         const totalCartons = customerProduction.reduce((sum, t) => sum + (t.cartonsShipped || 0), 0);
          
-         if (production.length === 0) return null;
+         if (customerProduction.length === 0) return null;
 
          return (
             <div key={customer} className="bg-white dark:bg-gray-800 shadow-md rounded-lg overflow-hidden mb-8">
@@ -317,40 +177,33 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
                   <thead className="bg-gray-50 dark:bg-gray-800">
                     <tr>
                       <TableHeader label="Date" column="date" />
-                      <TableHeader label="Batch / PO #" column="orderNumber" />
+                      <TableHeader label="Lot Numbers" column="orderNumber" />
                       <TableHeader label="Product" column="productName" />
                       <TableHeader label="Cartons" column="cartonsProduced" align="right" />
-                      {isEditMode && <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>}
+                      {isManageMode && <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>}
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {production.map(t => (
-                      <tr key={`${t.id}-${t.displayStatus}`} className={getRowStyle(t.displayStatus)}>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 align-top">
+                    {customerProduction.map(t => (
+                      <tr key={t.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
                           {new Date(t.date).toLocaleDateString()}
                         </td>
-                         <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-300 font-mono min-w-[200px] whitespace-normal break-words align-top">
-                          {t.orderNumber || '-'}
+                         <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-300 font-mono min-w-[150px]">
+                             {t.orderNumber || '-'}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white align-top">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
                           {t.productName}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 dark:text-white font-bold font-mono align-top">
-                          {t.cartonsShipped?.toLocaleString()}
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 dark:text-white font-bold font-mono">
+                             {t.cartonsShipped?.toLocaleString()}
                         </td>
-                        {isEditMode && (
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium align-top">
-                                {t.displayStatus === 'deleted' || t.displayStatus === 'modified-original' ? (
-                                    <button onClick={() => undoChange(t.id)} className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300">Undo</button>
-                                ) : (
-                                    <div className="flex justify-end space-x-3">
-                                        {t.displayStatus === 'new' && (
-                                            <button onClick={() => undoChange(t.id)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400">Revert</button>
-                                        )}
-                                        <button onClick={() => initiateEdit(t)} className="text-brand-red hover:text-red-900 dark:text-red-400 dark:hover:text-red-300">Edit</button>
-                                        <button onClick={() => initiateDelete(t.id)} className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200">Delete</button>
-                                    </div>
-                                )}
+                        {isManageMode && (
+                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                <div className="flex justify-end space-x-3 items-center">
+                                    <button onClick={() => setEditingTransaction(t)} className="text-brand-red hover:text-red-900 dark:text-red-400 dark:hover:text-red-300">Edit</button>
+                                    <button onClick={() => setItemToDelete(t.id)} className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200">Delete</button>
+                                </div>
                             </td>
                         )}
                       </tr>

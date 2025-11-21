@@ -1,5 +1,5 @@
 
-import { InventoryItem, Product, ProductId, DeductionRule, InventoryState, ProductState } from './types';
+import { InventoryItem, Product, ProductId, DeductionRule, InventoryState, ProductState, AppSettings, LotLevel } from './types';
 
 export const INVENTORY_ITEMS: InventoryItem[] = [
   // Raw Materials
@@ -85,24 +85,22 @@ export const DEDUCTION_RULES: Record<ProductId, DeductionRule> = {
   },
 };
 
-export const LOT_CAPACITIES = {
-    LV1: 1759,
-    LV2: 879,
-    LV3_ALLIANCE: 1055,
-    LV3_PHSA_PADM: 527,
-};
+export const DEFAULT_LOT_SIZE_BOXES = 10080;
 
-export type LotLevel = 'LV1' | 'LV2' | 'LV3';
-
-export const getProductLotConfig = (productId: ProductId): { level: LotLevel, maxCartons: number } => {
-    if (productId.includes('allianceL1')) return { level: 'LV1', maxCartons: LOT_CAPACITIES.LV1 };
-    if (productId.includes('allianceL2')) return { level: 'LV2', maxCartons: LOT_CAPACITIES.LV2 };
+export const getProductLotConfig = (productId: ProductId, settings: AppSettings): { level: LotLevel, maxCartons: number } => {
+    const formula = settings.productFormulas[productId];
+    const boxesPerCarton = formula ? formula.boxesPerCarton : 10; // Default safety
     
-    if (productId.includes('allianceL3')) return { level: 'LV3', maxCartons: LOT_CAPACITIES.LV3_ALLIANCE };
-    if (productId === 'phsaL3Blue' || productId === 'padmL3Blue') return { level: 'LV3', maxCartons: LOT_CAPACITIES.LV3_PHSA_PADM };
+    // Capacity Formula: (Total Boxes / Boxes Per Carton) - 1 for Quality Control
+    const maxCartons = Math.floor(settings.lotSizeMaskBoxes / boxesPerCarton) - 1;
+
+    if (productId.includes('allianceL1')) return { level: 'LV1', maxCartons };
+    if (productId.includes('allianceL2')) return { level: 'LV2', maxCartons };
+    if (productId.includes('allianceL3')) return { level: 'LV3', maxCartons };
+    if (productId === 'phsaL3Blue' || productId === 'padmL3Blue') return { level: 'LV3', maxCartons };
 
     // Fallback
-    return { level: 'LV3', maxCartons: 500 }; 
+    return { level: 'LV3', maxCartons }; 
 };
 
 

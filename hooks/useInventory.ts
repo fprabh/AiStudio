@@ -1,7 +1,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
-import { InventoryState, ProductState, Transaction, InventoryItemId, ProductId, TransactionDetail, AppSettings } from '../types';
-import { INITIAL_INVENTORY_STATE, INITIAL_PRODUCT_STATE, INVENTORY_ITEMS, DEDUCTION_RULES, FINISHED_PRODUCTS } from '../constants';
+import { InventoryState, ProductState, LotState, Transaction, InventoryItemId, ProductId, TransactionDetail, AppSettings } from '../types';
+import { INITIAL_INVENTORY_STATE, INITIAL_PRODUCT_STATE, INVENTORY_ITEMS, DEDUCTION_RULES, FINISHED_PRODUCTS, DEFAULT_LOT_SIZE_BOXES } from '../constants';
 import { calculateDeductions } from '../utils';
 
 const ITEMS_MAP = new Map(INVENTORY_ITEMS.map(item => [item.id, item]));
@@ -12,6 +12,7 @@ const generateDefaultSettings = (): AppSettings => ({
     stockThresholds: INVENTORY_ITEMS.reduce((acc, item) => ({ ...acc, [item.id]: { low: 5, ideal: 15 } }), {} as Record<InventoryItemId, { low: number, ideal: number }>),
     productFormulas: DEDUCTION_RULES,
     lotSequences: { 'LV1': 10000, 'LV2': 10000, 'LV3': 10000 },
+    lotSizeMaskBoxes: DEFAULT_LOT_SIZE_BOXES,
     materialUsage: {
         masksPerRollMeltblown: 11428,
         masksPerRollBackLayer: 11428,
@@ -56,6 +57,7 @@ const mergeSettings = (loadedSettings: Partial<AppSettings> | any): AppSettings 
         stockThresholds: { ...defaultSettings.stockThresholds, ...loadedSettings.stockThresholds },
         productFormulas: { ...defaultSettings.productFormulas, ...loadedSettings.productFormulas },
         lotSequences: { ...defaultSettings.lotSequences, ...loadedSettings.lotSequences },
+        lotSizeMaskBoxes: loadedSettings.lotSizeMaskBoxes || defaultSettings.lotSizeMaskBoxes,
         materialUsage: mergedMaterialUsage,
     };
 }
@@ -66,6 +68,7 @@ export const useInventory = () => {
   // Inventory state is now derived from transactions, not stored directly.
   const [inventory, setInventory] = useState<InventoryState>(INITIAL_INVENTORY_STATE);
   const [productInventory, setProductInventory] = useState<ProductState>(INITIAL_PRODUCT_STATE);
+  const [lotState, setLotState] = useState<LotState>({});
 
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
     try {
@@ -100,6 +103,7 @@ export const useInventory = () => {
   useEffect(() => {
     const newInventory = { ...INITIAL_INVENTORY_STATE };
     const newProductInventory = { ...INITIAL_PRODUCT_STATE };
+    const newLotState: LotState = {};
 
     // Transactions are stored newest-first, so we reverse to process them chronologically.
     [...transactions].reverse().forEach(tx => {
@@ -116,13 +120,27 @@ export const useInventory = () => {
             // 2. Add Finished Good to Stock
             newProductInventory[tx.productId] = (newProductInventory[tx.productId] || 0) + tx.cartonsShipped;
 
+            // 3. Update Lot State (Add Production)
+            if (tx.orderNumber) {
+                // Initialize with 0 if undefined, then add
+                newLotState[tx.orderNumber] = (newLotState[tx.orderNumber] || 0) + tx.cartonsShipped;
+            }
+
         } else if (tx.type === 'SHIPMENT' && tx.productId && tx.cartonsShipped) {
             // 1. Deduct Finished Good from Stock
              newProductInventory[tx.productId] = (newProductInventory[tx.productId] || 0) - tx.cartonsShipped;
+
+            // 2. Deduct from Lot State if allocations exist
+            if (tx.lotAllocations) {
+                Object.entries(tx.lotAllocations).forEach(([lotNumber, qty]) => {
+                    newLotState[lotNumber] = (newLotState[lotNumber] || 0) - qty;
+                });
+            }
         }
     });
     setInventory(newInventory);
     setProductInventory(newProductInventory);
+    setLotState(newLotState);
   }, [transactions, settings]);
 
 
@@ -156,7 +174,7 @@ export const useInventory = () => {
     setTransactions(prev => [newTransaction, ...prev]);
   }, []);
 
-  const logProduction = useCallback((productId: ProductId, cartonsProduced: number, orderNumber: string, date?: string) => {
+  const logProduction = useCallback((productId: ProductId, cartonsProduced: number, orderNumber: string, date?: string, materialLinkage?: Partial<Record<InventoryItemId, string>>) => {
     const product = FINISHED_PRODUCTS.find(p => p.id === productId);
     if (!product) return;
 
@@ -169,12 +187,13 @@ export const useInventory = () => {
       orderNumber: orderNumber || undefined,
       productId: productId,
       cartonsShipped: cartonsProduced, 
+      materialLinkage: materialLinkage
     };
 
     setTransactions(prev => [newTransaction, ...prev]);
   }, []);
 
-  const logShipment = useCallback((productId: ProductId, cartonsShipped: number, orderNumber: string, date?: string) => {
+  const logShipment = useCallback((productId: ProductId, cartonsShipped: number, orderNumber: string, date?: string, lotAllocations?: Record<string, number>) => {
       const product = FINISHED_PRODUCTS.find(p => p.id === productId);
       if (!product) return;
 
@@ -187,6 +206,7 @@ export const useInventory = () => {
           orderNumber: orderNumber || undefined,
           productId: productId,
           cartonsShipped: cartonsShipped,
+          lotAllocations: lotAllocations || undefined
       };
       setTransactions(prev => [newTransaction, ...prev]);
   }, []);
@@ -207,10 +227,26 @@ export const useInventory = () => {
   const exportData = useCallback(() => {
     // Ensure export does not contain calculated details for PRODUCTION or SHIPMENT, only metadata.
     const cleanTransactions = transactions.map(t => {
+        // Cast to any to allow adding temporary properties like lotNumber
+        const exportTx: any = { ...t };
+
         if (t.type === 'PRODUCTION' || t.type === 'OUT' || t.type === 'SHIPMENT') {
-            return { ...t, details: [] };
+            exportTx.details = [];
         }
-        return t;
+
+        // Rename orderNumber to lotNumber for PRODUCTION records to distinguish from Shipment POs
+        if (t.type === 'PRODUCTION' && exportTx.orderNumber) {
+            exportTx.lotNumber = exportTx.orderNumber;
+            delete exportTx.orderNumber;
+        }
+
+        // Rename orderNumber to stockId for IN records to distinguish from Shipment POs
+        if (t.type === 'IN' && exportTx.orderNumber) {
+            exportTx.stockId = exportTx.orderNumber;
+            delete exportTx.orderNumber;
+        }
+
+        return exportTx;
     });
 
     const data = {
@@ -231,8 +267,21 @@ export const useInventory = () => {
             const data = JSON.parse(jsonData);
             if (data.transactions) {
                 const uniqueIds = new Set();
-                const migratedTransactions = data.transactions.map((t: Transaction) => {
-                    let mapped = t.type === 'OUT' ? { ...t, type: 'PRODUCTION' } : t;
+                const migratedTransactions = data.transactions.map((t: any) => {
+                    let mapped = t.type === 'OUT' ? { ...t, type: 'PRODUCTION' } : { ...t };
+                    
+                    // Map lotNumber back to orderNumber for PRODUCTION records
+                    if (mapped.type === 'PRODUCTION' && mapped.lotNumber) {
+                        mapped.orderNumber = mapped.lotNumber;
+                        delete mapped.lotNumber;
+                    }
+
+                    // Map stockId back to orderNumber for IN records
+                    if (mapped.type === 'IN' && mapped.stockId) {
+                        mapped.orderNumber = mapped.stockId;
+                        delete mapped.stockId;
+                    }
+
                      if (uniqueIds.has(mapped.id)) {
                         mapped = { ...mapped, id: mapped.id + '-dup-' + Math.random().toString(36).substr(2, 5) };
                     }
@@ -251,5 +300,5 @@ export const useInventory = () => {
     });
   }, []);
 
-  return { inventory, productInventory, transactions, settings, updateSettings, addStock, logProduction, logShipment, exportData, importData, deleteTransaction, updateTransaction, addTransaction };
+  return { inventory, productInventory, lotState, transactions, settings, updateSettings, addStock, logProduction, logShipment, exportData, importData, deleteTransaction, updateTransaction, addTransaction };
 };

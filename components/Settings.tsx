@@ -24,7 +24,7 @@ const Settings: React.FC<SettingsProps> = ({ settings: initialSettings, updateSe
 
     const handleSettingsChange = (category: keyof typeof localSettings, id: string, field: string, value: any) => {
         setLocalSettings(prev => {
-            const newCategoryState = { ...prev[category] };
+            const newCategoryState = { ...(prev[category] as any) };
             if (category === 'materialUsage') {
                  (newCategoryState as any)[id] = value;
             } else if (typeof newCategoryState[id as keyof typeof newCategoryState] === 'object') {
@@ -34,6 +34,10 @@ const Settings: React.FC<SettingsProps> = ({ settings: initialSettings, updateSe
             }
             return { ...prev, [category]: newCategoryState };
         });
+    };
+
+    const handleRootSettingChange = (key: keyof typeof localSettings, value: any) => {
+         setLocalSettings(prev => ({ ...prev, [key]: value }));
     };
     
     const handleSaveSettings = () => {
@@ -111,6 +115,30 @@ const Settings: React.FC<SettingsProps> = ({ settings: initialSettings, updateSe
                             ))}
                         </tbody>
                      </table>
+                 </div>
+            </div>
+
+            {/* Lot Configuration */}
+            <div className="p-6 bg-white dark:bg-gray-800 rounded-lg shadow-md">
+                 <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Lot Configuration</h3>
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Max Mask Boxes per Lot</label>
+                        <div className="mt-1 relative rounded-md shadow-sm">
+                            <input 
+                                type="number" 
+                                className="w-full text-left bg-gray-100 dark:bg-gray-700 rounded p-2 border-gray-300 focus:ring-brand-red focus:border-brand-red" 
+                                value={localSettings.lotSizeMaskBoxes} 
+                                onChange={e => handleRootSettingChange('lotSizeMaskBoxes', parseInt(e.target.value) || 0)} 
+                            />
+                             <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                                <span className="text-gray-500 sm:text-sm">boxes</span>
+                            </div>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-2">
+                            Carton capacity for each product is automatically calculated based on this value and the 'Boxes/Carton' setting above. One carton is reserved for Quality Control.
+                        </p>
+                    </div>
                  </div>
             </div>
 

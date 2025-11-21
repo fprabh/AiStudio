@@ -1,22 +1,24 @@
 
-import React, { useState, useMemo } from 'react';
-import { Transaction, InventoryItemId, ProductId, InventoryState, ProductState } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Transaction, InventoryItemId, ProductId, InventoryState, ProductState, LotState } from '../types';
 import { useInventory } from '../hooks/useInventory';
-import { INVENTORY_ITEMS, FINISHED_PRODUCTS } from '../constants';
+import { INVENTORY_ITEMS, FINISHED_PRODUCTS, getProductLotConfig } from '../constants';
 import { calculateDeductions } from '../utils';
 
 type EditModalProps = {
     transaction: Transaction;
     onClose: () => void;
-    onSave: (transaction: Transaction, splitTransaction?: Transaction) => void;
+    onSave: (transaction: Transaction) => void;
     settings: ReturnType<typeof useInventory>['settings'];
     inventory?: InventoryState; 
     productInventory?: ProductState;
+    transactions?: Transaction[]; // For lot history lookup
+    lotState?: LotState;
 };
 
 const ITEMS_MAP = new Map(INVENTORY_ITEMS.map(item => [item.id, item]));
 
-const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, onSave, settings, inventory, productInventory }) => {
+const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, onSave, settings, inventory, productInventory, transactions, lotState }) => {
     const [formData, setFormData] = useState({
         date: new Date(transaction.date).toISOString().split('T')[0],
         orderNumber: transaction.orderNumber || '',
@@ -29,23 +31,68 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
         cartonsShipped: transaction.cartonsShipped || 0,
     });
 
-    // Split functionality state
-    const [isSplitMode, setIsSplitMode] = useState(false);
-    const [splitData, setSplitData] = useState({
-        quantity: '',
-        date: new Date(transaction.date).toISOString().split('T')[0],
-        orderNumber: '',
-    });
+    // Lot Allocation State for Shipments (Record<LotNumber, Quantity>)
+    const [allocations, setAllocations] = useState<Record<string, number>>({});
 
-    const canSplit = (transaction.type === 'PRODUCTION' || transaction.type === 'OUT');
+    // Initialize allocations from transaction
+    useEffect(() => {
+        if (transaction.type === 'SHIPMENT' && transaction.lotAllocations) {
+            setAllocations(transaction.lotAllocations);
+        }
+    }, [transaction]);
+
+    // Get Available Lots for the selected product
+    const availableLots = useMemo(() => {
+        if (transaction.type !== 'SHIPMENT' || !formData.productId || !transactions || !lotState) return [];
+        
+        // 1. Find relevant production transactions to get dates
+        const productionTxs = transactions.filter(
+            t => t.type === 'PRODUCTION' && t.productId === formData.productId && t.orderNumber
+        );
+
+        // 2. Aggregate to find earliest date per lot
+        const uniqueLots = new Map<string, string>();
+        productionTxs.forEach(t => {
+            const lot = t.orderNumber!;
+            const current = uniqueLots.get(lot);
+            if (!current || new Date(t.date) < new Date(current)) {
+                uniqueLots.set(lot, t.date);
+            }
+        });
+
+        // 3. Map to remaining balance, including current allocation for this transaction being edited
+        const aggregated = Array.from(uniqueLots.entries()).map(([lot, date]) => {
+            // Add back what was allocated in this specific transaction to see the 'effective' available amount for it
+            const currentAllocatedHere = transaction.lotAllocations?.[lot] || 0;
+            const remaining = (lotState[lot] || 0) + currentAllocatedHere;
+            return { lot, date, remaining };
+        }).filter(l => l.remaining > 0);
+
+        // 4. Sort by Lot Sequence (Low to High), then Date
+        return aggregated.sort((a, b) => {
+             const getSeq = (str: string) => {
+                  const match = str.match(/(\d+)$/);
+                  return match ? parseInt(match[0], 10) : 0;
+              };
+              const seqA = getSeq(a.lot);
+              const seqB = getSeq(b.lot);
+              
+              if (seqA !== 0 && seqB !== 0 && seqA !== seqB) {
+                  return seqA - seqB;
+              }
+              
+              if (seqA === seqB && a.lot !== b.lot) {
+                  return a.lot.localeCompare(b.lot, undefined, { numeric: true });
+              }
+    
+              return new Date(a.date).getTime() - new Date(b.date).getTime();
+        });
+    }, [formData.productId, transactions, lotState, transaction]);
+
 
     const updatedDetails = useMemo(() => {
         let effectiveCartons = formData.cartonsShipped;
-        if (isSplitMode && canSplit) {
-             const splitQty = parseFloat(splitData.quantity) || 0;
-             effectiveCartons = Math.max(0, formData.cartonsShipped - splitQty);
-        }
-
+        
         if ((transaction.type === 'PRODUCTION' || transaction.type === 'OUT') && formData.productId && effectiveCartons > 0) {
             // Calculates raw material usage for Preview only
             return calculateDeductions(formData.productId as ProductId, effectiveCartons, settings);
@@ -55,8 +102,28 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
             return [{ itemId: item.id, itemName: item.name, quantity: formData.quantity }];
         }
         return transaction.details || []; 
-    }, [formData, settings, transaction.type, transaction.details, isSplitMode, splitData.quantity, canSplit]);
+    }, [formData, settings, transaction.type, transaction.details]);
 
+    const lotStats = useMemo(() => {
+        if ((transaction.type !== 'PRODUCTION' && transaction.type !== 'OUT') || !formData.orderNumber || !formData.productId || !transactions) return null;
+        
+        // Calculate total produced for this lot (excluding current if editing, then adding new value)
+        let totalProduced = 0;
+        transactions.forEach(t => {
+            if ((t.type === 'PRODUCTION' || t.type === 'OUT') && t.orderNumber === formData.orderNumber && t.id !== transaction.id) {
+                totalProduced += (t.cartonsShipped || 0);
+            }
+        });
+        totalProduced += formData.cartonsShipped;
+
+        const config = getProductLotConfig(formData.productId as ProductId, settings);
+        
+        return {
+            produced: totalProduced,
+            max: config.maxCartons,
+            remaining: config.maxCartons - totalProduced
+        };
+    }, [transaction, formData, transactions, settings]);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
         const { name, value } = e.target;
@@ -64,9 +131,33 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
         setFormData(prev => ({ ...prev, [name]: isNumber ? parseFloat(value) || 0 : value }));
     };
 
-    const handleSplitChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const { name, value } = e.target;
-        setSplitData(prev => ({ ...prev, [name]: value }));
+    const handleAllocationChange = (lotNumber: string, val: string) => {
+        const qty = parseFloat(val);
+        if (isNaN(qty) || qty <= 0) {
+            const newAlloc = { ...allocations };
+            delete newAlloc[lotNumber];
+            setAllocations(newAlloc);
+        } else {
+            setAllocations(prev => ({ ...prev, [lotNumber]: qty }));
+        }
+    };
+  
+    const handleAutoFill = () => {
+        if (formData.cartonsShipped <= 0) return;
+        
+        const newAllocations: Record<string, number> = {};
+        let remainingToFill = formData.cartonsShipped;
+
+        for (const lot of availableLots) {
+            if (remainingToFill <= 0) break;
+            
+            const take = Math.min(remainingToFill, lot.remaining);
+            if (take > 0) {
+                newAllocations[lot.lot] = take;
+                remainingToFill -= take;
+            }
+        }
+        setAllocations(newAllocations);
     };
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -83,39 +174,18 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
             return '';
         };
 
-        // Handle Split Logic
-        let finalOriginalCartons = formData.cartonsShipped;
-        let splitTransaction: Transaction | undefined = undefined;
-
-        if (isSplitMode && canSplit && splitData.quantity) {
-            const splitQty = parseFloat(splitData.quantity);
-            if (splitQty > 0 && splitQty < formData.cartonsShipped) {
-                finalOriginalCartons = formData.cartonsShipped - splitQty;
-                
-                // Create New Transaction
-                splitTransaction = {
-                    id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                    date: new Date(splitData.date).toISOString(),
-                    type: transaction.type,
-                    description: getDescription('PRODUCTION', splitQty, product),
-                    details: [], // Will be empty for PRODUCTION/SHIPMENT as they are calc'd
-                    orderNumber: splitData.orderNumber || undefined,
-                    productId: formData.productId as ProductId,
-                    cartonsShipped: splitQty
-                };
-            } else {
-                alert("Invalid split quantity. Must be greater than 0 and less than total.");
-                return;
-            }
-        }
-
         // Update Original Transaction
         const updatedDescription = getDescription(
             transaction.type === 'IN' ? 'IN' : (transaction.type === 'SHIPMENT' ? 'SHIPMENT' : 'PRODUCTION'),
-            finalOriginalCartons,
+            formData.cartonsShipped,
             product,
             item
         );
+        
+        let updatedLotAllocations: Record<string, number> | undefined = undefined;
+        if (transaction.type === 'SHIPMENT' && Object.keys(allocations).length > 0) {
+            updatedLotAllocations = allocations;
+        }
 
         const updatedTransaction: Transaction = {
             ...transaction,
@@ -124,13 +194,19 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
             details: transaction.type === 'IN' ? updatedDetails : [], 
             description: updatedDescription,
             productId: (transaction.type === 'PRODUCTION' || transaction.type === 'SHIPMENT' || transaction.type === 'OUT') && formData.productId ? formData.productId as ProductId : undefined,
-            cartonsShipped: (transaction.type === 'PRODUCTION' || transaction.type === 'SHIPMENT' || transaction.type === 'OUT') ? finalOriginalCartons : undefined,
+            cartonsShipped: (transaction.type === 'PRODUCTION' || transaction.type === 'SHIPMENT' || transaction.type === 'OUT') ? formData.cartonsShipped : undefined,
+            lotAllocations: updatedLotAllocations
         };
 
-        onSave(updatedTransaction, splitTransaction);
+        onSave(updatedTransaction);
     };
 
     const getTitle = () => {
+        if (transaction.id.startsWith('new-')) {
+             if (transaction.type === 'IN') return "Add Incoming Stock";
+             if (transaction.type === 'SHIPMENT') return "Log Shipment";
+             return "Log Production";
+        }
         if (transaction.type === 'IN') return "Edit Incoming Stock";
         if (transaction.type === 'PRODUCTION' || transaction.type === 'OUT') return "Edit Production Log";
         if (transaction.type === 'SHIPMENT') return "Edit Shipment Log";
@@ -165,90 +241,99 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
                 </select>
             </div>
             <div>
-                <label className="block text-sm font-medium">{label} {isSplitMode && "(Total)"}</label>
-                <input type="number" name="cartonsShipped" value={formData.cartonsShipped} onChange={handleChange} className="mt-1 block w-full input-base" min="1" required disabled={isSplitMode}/>
-                {isSplitMode && <p className="text-xs text-gray-500 mt-1">Total before splitting. Adjust split below.</p>}
+                <label className="block text-sm font-medium">{label}</label>
+                <input type="number" name="cartonsShipped" value={formData.cartonsShipped} onChange={handleChange} className="mt-1 block w-full input-base" min="1" required />
             </div>
         </>
     );
-    
-    const renderSplitUI = () => {
-        const originalAmount = formData.cartonsShipped || 0;
-        const splitAmount = parseFloat(splitData.quantity) || 0;
-        const remainingAmount = Math.max(0, originalAmount - splitAmount);
+
+    const renderLotAllocationTable = () => {
+        if (transaction.type !== 'SHIPMENT') return null;
+        
+        const totalAllocated = Object.values(allocations).reduce((sum, qty) => sum + qty, 0);
+        const unallocated = Math.max(0, formData.cartonsShipped - totalAllocated);
 
         return (
-            <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800">
-                <h4 className="text-sm font-bold text-blue-800 dark:text-blue-300 mb-3 flex items-center">
-                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.121 14.121L19 19m-7-7l7-7m-7 7l-2.879 2.879M12 12L9.121 9.121m0 5.758a3 3 0 10-4.243 4.243 3 3 0 004.243-4.243zm8.486-.486a3 3 0 10-4.243-4.243 3 3 0 004.243 4.243z"></path></svg>
-                    Split Transaction
-                </h4>
-                
-                <div className="grid grid-cols-2 gap-4">
-                    {/* Original Remainder */}
-                    <div className="p-3 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700">
-                         <p className="text-xs text-gray-500 uppercase font-semibold mb-1">Original Log (Remainder)</p>
-                         <div className="text-2xl font-mono font-bold text-gray-800 dark:text-white">{remainingAmount}</div>
-                         <div className="text-xs text-gray-400">cartons</div>
+             <div className="pt-2">
+                <div className="flex justify-between items-end mb-2">
+                    <h4 className="text-sm font-semibold">Lot Allocations</h4>
+                     <div className="flex items-center space-x-3">
+                        <button
+                            type="button"
+                            onClick={handleAutoFill}
+                            className="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-200 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800 dark:hover:bg-blue-900/50 transition-colors uppercase font-medium"
+                        >
+                            Auto Fill
+                        </button>
+                        <div className="text-xs">
+                             <span className="text-gray-500 dark:text-gray-400 mr-2">Required: <span className="font-bold">{formData.cartonsShipped}</span></span>
+                             <span className={totalAllocated !== formData.cartonsShipped ? "text-orange-600 font-bold" : "text-green-600 font-bold"}>
+                                 Allocated: {totalAllocated}
+                             </span>
+                        </div>
                     </div>
+                </div>
 
-                    {/* New Split Transaction */}
-                     <div className="p-3 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 shadow-sm ring-1 ring-blue-200 dark:ring-blue-800">
-                         <p className="text-xs text-blue-600 dark:text-blue-400 uppercase font-semibold mb-2">New Transaction</p>
-                         
-                         <div className="space-y-2">
-                             <div>
-                                 <label className="block text-xs text-gray-500">Quantity</label>
-                                 <input 
-                                    type="number" 
-                                    name="quantity" 
-                                    value={splitData.quantity} 
-                                    onChange={handleSplitChange} 
-                                    className="w-full text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-700 rounded px-2 py-1" 
-                                    placeholder="Amount to split"
-                                    max={originalAmount - 1}
-                                 />
-                             </div>
-                              <div>
-                                 <label className="block text-xs text-gray-500">Date</label>
-                                 <input 
-                                    type="date" 
-                                    name="date" 
-                                    value={splitData.date} 
-                                    onChange={handleSplitChange} 
-                                    className="w-full text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-700 rounded px-2 py-1" 
-                                 />
-                             </div>
-                              <div>
-                                 <label className="block text-xs text-gray-500">Ref #</label>
-                                 <input 
-                                    type="text" 
-                                    name="orderNumber" 
-                                    value={splitData.orderNumber} 
-                                    onChange={handleSplitChange} 
-                                    className="w-full text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-700 rounded px-2 py-1" 
-                                    placeholder="Optional"
-                                 />
-                             </div>
-                         </div>
+                <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md overflow-hidden">
+                    <div className="overflow-x-auto max-h-48">
+                        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                            <thead className="bg-gray-50 dark:bg-gray-700 sticky top-0 z-10">
+                                <tr>
+                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Lot Number</th>
+                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Date</th>
+                                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Avail</th>
+                                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-24">Alloc</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-gray-800">
+                                {availableLots.length > 0 ? (
+                                    availableLots.map((lot) => {
+                                        const isAllocated = (allocations[lot.lot] || 0) > 0;
+                                        return (
+                                            <tr key={lot.lot} className={isAllocated ? "bg-blue-50 dark:bg-blue-900/20" : ""}>
+                                                <td className="px-3 py-2 text-xs font-mono text-gray-900 dark:text-white whitespace-nowrap">
+                                                    {lot.lot}
+                                                </td>
+                                                <td className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                                                    {new Date(lot.date).toLocaleDateString()}
+                                                </td>
+                                                <td className="px-3 py-2 text-xs text-right font-mono text-gray-700 dark:text-gray-300">
+                                                    {lot.remaining}
+                                                </td>
+                                                <td className="px-3 py-2">
+                                                     <div className="flex justify-end">
+                                                         <input
+                                                            type="number"
+                                                            min="0"
+                                                            max={lot.remaining}
+                                                            value={allocations[lot.lot] || ''}
+                                                            onChange={(e) => handleAllocationChange(lot.lot, e.target.value)}
+                                                            className="block w-16 text-right text-xs border-gray-300 rounded-md shadow-sm focus:ring-brand-red focus:border-brand-red dark:bg-gray-700 dark:border-gray-600 dark:text-white p-1"
+                                                            placeholder="0"
+                                                        />
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })
+                                ) : (
+                                    <tr>
+                                        <td colSpan={4} className="px-3 py-4 text-center text-xs text-gray-500 dark:text-gray-400 italic">
+                                            No available lots found.
+                                        </td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
         );
     };
-
+    
     const renderDetailedProductionTable = () => {
         if (!inventory) return null;
 
-        // Determine quantity for simulation:
-        // If splitting, we check the "Remainder" of the original transaction logic (simulating the edit).
-        let simulationQty = formData.cartonsShipped;
-        if (isSplitMode && canSplit) {
-             const splitQty = parseFloat(splitData.quantity) || 0;
-             simulationQty = Math.max(0, formData.cartonsShipped - splitQty);
-        }
-
-        // Create a map of original deductions to "add back" to simulated stock
         const originalDeductionsMap = new Map<InventoryItemId, number>();
         if (transaction.type === 'PRODUCTION' || transaction.type === 'OUT') {
              if (transaction.productId && transaction.cartonsShipped) {
@@ -262,8 +347,7 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
         return (
             <div className="pt-2">
                 <h4 className="text-sm font-semibold mb-2">
-                    Material Breakdown & Stock Check 
-                    {isSplitMode ? <span className="text-gray-500 font-normal text-xs ml-1">(Based on Remainder)</span> : null}:
+                    Material Breakdown & Stock Check:
                 </h4>
                 <div className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded overflow-hidden">
                      <div className="overflow-x-auto max-h-60">
@@ -324,7 +408,7 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
         const originalAmount = (isSameProduct && transaction.cartonsShipped) ? transaction.cartonsShipped : 0;
         
         const effectiveStock = currentStock + originalAmount;
-        const required = formData.cartonsShipped; // Split logic not applied to Shipments yet per request, but logic is similar
+        const required = formData.cartonsShipped;
         const remaining = effectiveStock - required;
         const isShortage = remaining < 0;
 
@@ -414,43 +498,44 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
 
     return (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center p-4 z-50">
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-lg max-h-full overflow-y-auto">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
                 <form onSubmit={handleSubmit} className="p-6 space-y-4">
                     <div className="flex justify-between items-start">
                         <h3 className="text-xl font-bold text-gray-900 dark:text-white">{getTitle()}</h3>
-                         {canSplit && (
-                            <div className="flex items-center space-x-2">
-                                <span className="text-sm text-gray-600 dark:text-gray-300">Split</span>
-                                <button 
-                                    type="button"
-                                    onClick={() => setIsSplitMode(!isSplitMode)}
-                                    className={`${isSplitMode ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'} relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2`}
-                                >
-                                    <span className={`${isSplitMode ? 'translate-x-6' : 'translate-x-1'} inline-block h-4 w-4 transform rounded-full bg-white transition-transform`}/>
-                                </button>
-                            </div>
-                        )}
                     </div>
 
                     {transaction.type === 'IN' && renderStockInForm()}
                     {(transaction.type === 'PRODUCTION' || transaction.type === 'OUT') && renderProductForm("Cartons Produced")}
                     {transaction.type === 'SHIPMENT' && renderProductForm("Cartons Shipped")}
                     
-                    {isSplitMode && renderSplitUI()}
-
-                    {!isSplitMode && (
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium">Date</label>
-                                <input type="date" name="date" value={formData.date} onChange={handleChange} className="mt-1 block w-full input-base" required />
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium">Date</label>
+                            <input type="date" name="date" value={formData.date} onChange={handleChange} className="mt-1 block w-full input-base" required />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium">
+                                {transaction.type === 'PRODUCTION' || transaction.type === 'OUT' ? 'Lot Number' : 'Reference Number'}
+                            </label>
+                            <input type="text" name="orderNumber" value={formData.orderNumber} onChange={handleChange} className="mt-1 block w-full input-base font-mono" />
+                        </div>
+                    </div>
+                    
+                    {lotStats && (
+                        <div className="mt-2 text-xs p-2 bg-gray-50 dark:bg-gray-700 rounded border border-gray-200 dark:border-gray-600">
+                            <div className="flex justify-between mb-1">
+                                 <span className="font-semibold text-gray-700 dark:text-gray-300">Lot Capacity Usage:</span>
+                                 <span className={`font-mono ${lotStats.remaining < 0 ? "text-red-600 font-bold" : "text-gray-600 dark:text-gray-300"}`}>
+                                     {lotStats.produced} / {lotStats.max}
+                                 </span>
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium">Reference Number</label>
-                                <input type="text" name="orderNumber" value={formData.orderNumber} onChange={handleChange} className="mt-1 block w-full input-base" />
+                            <div className="w-full bg-gray-200 rounded-full h-1.5 dark:bg-gray-600">
+                                <div className={`h-1.5 rounded-full ${lotStats.remaining < 0 ? 'bg-red-500' : 'bg-blue-500'}`} style={{ width: `${Math.min(100, (lotStats.produced / lotStats.max) * 100)}%` }}></div>
                             </div>
+                            {lotStats.remaining < 0 && <p className="text-red-500 mt-1 font-semibold">Warning: Exceeds lot capacity.</p>}
                         </div>
                     )}
-
+                    
                     {/* Detailed Tables based on Transaction Type */}
                     {(transaction.type === 'PRODUCTION' || transaction.type === 'OUT') && inventory ? (
                         renderDetailedProductionTable()
@@ -471,6 +556,10 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
                     ) : null}
 
                     {transaction.type === 'SHIPMENT' && productInventory && renderShipmentStockCheck()}
+                    
+                    {/* Render Lot Allocation Table BELOW Finished Goods Check */}
+                    {renderLotAllocationTable()}
+
                     {transaction.type === 'IN' && inventory && renderStockInImpact()}
 
                     <div className="flex justify-end space-x-3 pt-4">

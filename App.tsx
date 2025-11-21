@@ -9,11 +9,11 @@ import TransactionLog from './components/TransactionLog';
 import Shipments from './components/Shipments';
 import ProductionHistory from './components/ProductionHistory';
 import StockHistory from './components/StockHistory';
-import LotHistory from './components/LotHistory';
 import AddStockForm from './components/AddStockForm';
 import LogProductionForm from './components/LogProductionForm';
 import LogShipmentForm from './components/LogShipmentForm';
 import Settings from './components/Settings';
+import LotHistory from './components/LotHistory';
 import { useTheme } from './hooks/useTheme';
 
 const App: React.FC = () => {
@@ -39,6 +39,7 @@ const App: React.FC = () => {
                   deleteTransaction={inventoryData.deleteTransaction}
                   settings={inventoryData.settings}
                   productInventory={inventoryData.productInventory}
+                  lotState={inventoryData.lotState}
                />;
       case 'productionHistory':
         return <ProductionHistory 
@@ -58,11 +59,7 @@ const App: React.FC = () => {
                   inventory={inventoryData.inventory}
                />;
       case 'lotHistory':
-        return <LotHistory 
-                  transactions={inventoryData.transactions}
-                  settings={inventoryData.settings}
-                  updateTransaction={inventoryData.updateTransaction}
-                />;
+        return <LotHistory transactions={inventoryData.transactions} settings={inventoryData.settings} />;
       case 'addStock':
         return <AddStockForm addStock={inventoryData.addStock} setView={setView} />;
       case 'logProduction':
@@ -74,7 +71,14 @@ const App: React.FC = () => {
                   updateSettings={inventoryData.updateSettings}
                />;
       case 'logShipment':
-        return <LogShipmentForm logShipment={inventoryData.logShipment} setView={setView} inventory={inventoryData.productInventory} settings={inventoryData.settings} />;
+        return <LogShipmentForm 
+                logShipment={inventoryData.logShipment} 
+                setView={setView} 
+                inventory={inventoryData.productInventory} 
+                settings={inventoryData.settings}
+                transactions={inventoryData.transactions}
+                lotState={inventoryData.lotState}
+            />;
       case 'settings':
         return <Settings 
           settings={inventoryData.settings} 

@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState } from 'react';
-import { Transaction, Customer, ProductState } from '../types';
+import { Transaction, Customer, ProductState, LotState } from '../types';
 import { FINISHED_PRODUCTS } from '../constants';
 import { useInventory } from '../hooks/useInventory';
 import EditTransactionModal from './EditTransactionModal';
@@ -12,6 +12,7 @@ interface ShipmentsProps {
   deleteTransaction: ReturnType<typeof useInventory>['deleteTransaction'];
   settings: ReturnType<typeof useInventory>['settings'];
   productInventory: ProductState;
+  lotState: LotState;
 }
 
 type ShipmentTransaction = Transaction & { 
@@ -21,7 +22,7 @@ type ShipmentTransaction = Transaction & {
 type SortKey = 'date' | 'orderNumber' | 'productName' | 'cartonsShipped';
 type SortDirection = 'asc' | 'desc';
 
-const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, deleteTransaction, settings, productInventory }) => {
+const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, deleteTransaction, settings, productInventory, lotState }) => {
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection }>({
     key: 'date',
     direction: 'desc',
@@ -42,6 +43,44 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
       direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc',
     }));
   };
+
+  // Calculate Effective Lot State based on Pending Changes
+  // This ensures that if a user edits one shipment to use Lot A, the next edit sees Lot A decreased immediately.
+  const effectiveLotState = useMemo(() => {
+      const state = { ...lotState };
+      
+      // 1. Handle Pending Updates (Revert Old, Apply New)
+      pendingUpdates.forEach((updatedTx, id) => {
+          const originalTx = transactions.find(t => t.id === id);
+          
+          // Revert original allocation (Add back to stock)
+          if (originalTx && originalTx.type === 'SHIPMENT' && originalTx.lotAllocations) {
+              Object.entries(originalTx.lotAllocations).forEach(([lot, qty]) => {
+                  state[lot] = (state[lot] || 0) + qty;
+              });
+          }
+          
+          // Apply new allocation (Subtract from stock)
+          if (updatedTx.type === 'SHIPMENT' && updatedTx.lotAllocations) {
+               Object.entries(updatedTx.lotAllocations).forEach(([lot, qty]) => {
+                  state[lot] = (state[lot] || 0) - qty;
+              });
+          }
+      });
+
+      // 2. Handle Pending Deletes (Revert Old)
+      pendingDeletes.forEach(id => {
+          const originalTx = transactions.find(t => t.id === id);
+           if (originalTx && originalTx.type === 'SHIPMENT' && originalTx.lotAllocations) {
+              Object.entries(originalTx.lotAllocations).forEach(([lot, qty]) => {
+                  state[lot] = (state[lot] || 0) + qty;
+              });
+          }
+      });
+
+      return state;
+  }, [lotState, pendingUpdates, pendingDeletes, transactions]);
+
 
   // Data Processing
   const shipmentsByCustomer = useMemo<Record<string, ShipmentTransaction[]>>(() => {
@@ -235,6 +274,9 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
                 onSave={confirmEdit}
                 settings={settings}
                 productInventory={productInventory}
+                inventory={undefined} // Not needed for shipments
+                transactions={transactions} // Pass all tx for lot calculation
+                lotState={effectiveLotState} // Pass computed state with pending edits
             />
         )}
         <ConfirmationModal 
@@ -304,42 +346,70 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
                       <TableHeader label="Date" column="date" />
                       <TableHeader label="Order #" column="orderNumber" />
                       <TableHeader label="Product" column="productName" />
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Lot Allocation</th>
                       <TableHeader label="Cartons" column="cartonsShipped" align="right" />
                       {isEditMode && <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>}
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {shipments.map((t, idx) => (
-                      <tr key={`${t.id}-${t.displayStatus}`} className={getRowStyle(t.displayStatus)}>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
-                          {new Date(t.date).toLocaleDateString()}
-                        </td>
-                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 font-mono">
-                          {t.orderNumber || '-'}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
-                          {t.productName}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 dark:text-white font-bold font-mono">
-                          {t.cartonsShipped?.toLocaleString()}
-                        </td>
-                        {isEditMode && (
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                {t.displayStatus === 'deleted' || t.displayStatus === 'modified-original' ? (
-                                    <button onClick={() => undoChange(t.id)} className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300">Undo</button>
-                                ) : (
-                                    <div className="flex justify-end space-x-3">
-                                        {t.displayStatus === 'new' && (
-                                            <button onClick={() => undoChange(t.id)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400">Revert</button>
+                    {shipments.map((t, idx) => {
+                        const totalAllocated = t.lotAllocations 
+                            ? Object.values(t.lotAllocations).reduce((a,b) => a + b, 0) 
+                            : 0;
+                        const isAllocatedFully = totalAllocated === (t.cartonsShipped || 0);
+
+                        return (
+                          <tr key={`${t.id}-${t.displayStatus}`} className={getRowStyle(t.displayStatus)}>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 align-top">
+                              {new Date(t.date).toLocaleDateString()}
+                            </td>
+                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 font-mono align-top">
+                              {t.orderNumber || '-'}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white align-top">
+                              {t.productName}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-300 align-top">
+                                {t.lotAllocations && Object.keys(t.lotAllocations).length > 0 ? (
+                                    <ul className="list-disc list-inside">
+                                        {Object.entries(t.lotAllocations).map(([lot, qty]) => (
+                                            <li key={lot}><span className="font-mono">{lot}</span>: <b>{qty}</b></li>
+                                        ))}
+                                        {!isAllocatedFully && (
+                                            <li className="text-red-500 list-none mt-1 flex items-center gap-1">
+                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                                                 Partial ({totalAllocated}/{t.cartonsShipped})
+                                            </li>
                                         )}
-                                        <button onClick={() => initiateEdit(t)} className="text-brand-red hover:text-red-900 dark:text-red-400 dark:hover:text-red-300">Edit</button>
-                                        <button onClick={() => initiateDelete(t.id)} className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200">Delete</button>
-                                    </div>
+                                    </ul>
+                                ) : (
+                                    <span className="flex items-center text-red-500 text-xs gap-1 bg-red-50 dark:bg-red-900/20 p-1 rounded w-fit">
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                                        Missing Lot Info
+                                    </span>
                                 )}
                             </td>
-                        )}
-                      </tr>
-                    ))}
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 dark:text-white font-bold font-mono align-top">
+                              {t.cartonsShipped?.toLocaleString()}
+                            </td>
+                            {isEditMode && (
+                                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium align-top">
+                                    {t.displayStatus === 'deleted' || t.displayStatus === 'modified-original' ? (
+                                        <button onClick={() => undoChange(t.id)} className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300">Undo</button>
+                                    ) : (
+                                        <div className="flex justify-end space-x-3">
+                                            {t.displayStatus === 'new' && (
+                                                <button onClick={() => undoChange(t.id)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400">Revert</button>
+                                            )}
+                                            <button onClick={() => initiateEdit(t)} className="text-brand-red hover:text-red-900 dark:text-red-400 dark:hover:text-red-300">Edit</button>
+                                            <button onClick={() => initiateDelete(t.id)} className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200">Delete</button>
+                                        </div>
+                                    )}
+                                </td>
+                            )}
+                          </tr>
+                        );
+                    })}
                   </tbody>
                 </table>
               </div>
