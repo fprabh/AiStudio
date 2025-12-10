@@ -17,7 +17,8 @@ type EditModalProps = {
     allowMaterialEditing?: boolean;
 };
 
-type ItemLine = Omit<TransactionDetail, 'itemName'> & { uniqueId: number };
+// Updated type to allow empty string for itemId during UI editing
+type ItemLine = Omit<TransactionDetail, 'itemName' | 'itemId'> & { uniqueId: number; itemId: InventoryItemId | '' };
 
 const ITEMS_MAP = new Map(INVENTORY_ITEMS.map(item => [item.id, item]));
 

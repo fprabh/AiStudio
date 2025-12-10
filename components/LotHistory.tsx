@@ -272,7 +272,7 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings, lotMeta
         const groups: Record<string, LotAggregated[]> = {};
         
         filteredLots.forEach(lot => {
-            let groupName = lot.customer || 'Unknown';
+            let groupName: string = lot.customer || 'Unknown';
             
             // Sub-divide Alliance based on Lot Number Prefix
             if (groupName === 'Alliance') {
