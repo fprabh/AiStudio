@@ -548,7 +548,7 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
                 </div>
              ))}
       </div>
-      )}
+      ))}
 
       {/* --- BY DATE VIEW --- */}
       {viewMode === 'byDate' && (
