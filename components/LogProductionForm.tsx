@@ -5,7 +5,7 @@ import { FINISHED_PRODUCTS, INVENTORY_ITEMS, getProductLotConfig } from '../cons
 import { useInventory } from '../hooks/useInventory';
 
 interface LogProductionFormProps {
-  logProduction: (productId: ProductId, cartonsProduced: number, orderNumber: string, date?: string, materialLinkage?: Partial<Record<InventoryItemId, string>>) => void;
+  logProduction: (productId: ProductId, cartonsProduced: number, orderNumber: string, date?: string, materialLinkage?: Partial<Record<InventoryItemId, string[]>>) => void;
   setView: (view: View) => void;
   inventory: InventoryState;
   settings: ReturnType<typeof useInventory>['settings'];
@@ -41,11 +41,8 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
   const [cartons, setCartons] = useState<string>('');
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
 
-  // Traceability State
-  // selectionMap: Stores dropdown value (e.g. "PO-123", "Count", "")
-  const [materialSelection, setMaterialSelection] = useState<Partial<Record<InventoryItemId, string>>>({});
-  // customInputMap: Stores manual text input when selection is "Count"
-  const [customInputs, setCustomInputs] = useState<Partial<Record<InventoryItemId, string>>>({});
+  // Traceability State: Stores array of selected stock IDs for each item
+  const [materialSelection, setMaterialSelection] = useState<Partial<Record<InventoryItemId, string[]>>>({});
 
   const availableProducts = useMemo(() => {
     return customer ? FINISHED_PRODUCTS.filter(p => p.customer === customer) : [];
@@ -75,8 +72,12 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
       requiredTraceabilityItems.forEach(itemId => {
           const ids = new Set<string>();
           transactions.forEach(t => {
-              if (t.type === 'IN' && t.details.length > 0 && t.details[0].itemId === itemId && t.orderNumber) {
-                  ids.add(t.orderNumber);
+              if (t.type === 'IN') {
+                  t.details.forEach(detail => {
+                      if (detail.itemId === itemId && detail.stockId) {
+                          ids.add(detail.stockId);
+                      }
+                  });
               }
           });
           map[itemId] = Array.from(ids).sort();
@@ -87,8 +88,25 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
   // Initialize state when product changes
   useEffect(() => {
       setMaterialSelection({});
-      setCustomInputs({});
   }, [productId]);
+
+  // Handler to add a stock ID to selection
+  const handleAddStockId = (itemId: InventoryItemId, stockId: string) => {
+      if (!stockId) return;
+      setMaterialSelection(prev => {
+          const current = prev[itemId] || [];
+          if (current.includes(stockId)) return prev;
+          return { ...prev, [itemId]: [...current, stockId] };
+      });
+  };
+
+  // Handler to remove a stock ID from selection
+  const handleRemoveStockId = (itemId: InventoryItemId, stockId: string) => {
+      setMaterialSelection(prev => {
+          const current = prev[itemId] || [];
+          return { ...prev, [itemId]: current.filter(id => id !== stockId) };
+      });
+  };
 
   // Automatic Lot Allocation Logic
   const lotAllocations = useMemo<LotAllocation[]>(() => {
@@ -100,7 +118,7 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
     const maxCapacity = config.maxCartons;
 
     // 1. Analyze Transaction History
-    const lotsMap: Record<string, { totalProduced: number, ownerCustomer: Customer, lastDate: Date }> = {};
+    const lotsMap: Record<string, { totalProduced: number, ownerCustomer: Customer }> = {};
     
     transactions.forEach(tx => {
             if ((tx.type === 'PRODUCTION' || tx.type === 'OUT') && tx.orderNumber && tx.productId) {
@@ -111,48 +129,51 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
                     lotsMap[tx.orderNumber] = { 
                         totalProduced: 0, 
                         ownerCustomer: txProd.customer,
-                        lastDate: new Date(tx.date)
                     };
                 }
                 lotsMap[tx.orderNumber].totalProduced += (tx.cartonsShipped || 0);
-                if (new Date(tx.date) > lotsMap[tx.orderNumber].lastDate) {
-                    lotsMap[tx.orderNumber].lastDate = new Date(tx.date);
-                }
             }
     });
 
-    // 2. Find the most recent active lot for THIS customer at THIS level
+    // 2. Find the appropriate lot to continue filling and determine max sequence
+    // Strategy: Look for the Highest Sequence Number for this customer/level.
+    
+    let maxTxSeq = 0; // Global max sequence for this Level (across all customers)
+    
+    let highestCustomerSeq = -1;
     let activeLot = '';
     let activeLotProduced = 0;
-    let latestDate = new Date(0);
 
     Object.entries(lotsMap).forEach(([lotNum, data]) => {
-        if (lotNum.startsWith(currentLevel) && data.ownerCustomer === customer) {
-            if (data.lastDate > latestDate) {
-                latestDate = data.lastDate;
-                activeLot = lotNum;
-                activeLotProduced = data.totalProduced;
-            }
-        }
-    });
-
-    // 3. Determine Max Sequence for New Lots
-    let maxSeq = settings.lotSequences[currentLevel];
-    Object.keys(lotsMap).forEach(lotNum => {
         if (lotNum.startsWith(currentLevel)) {
             const parts = lotNum.split('-');
             if (parts.length === 2) {
                 const seq = parseInt(parts[1].trim(), 10);
-                if (!isNaN(seq) && seq > maxSeq) {
-                    maxSeq = seq;
+                if (!isNaN(seq)) {
+                    // Update global max for level (to ensure uniqueness for new lots)
+                    if (seq > maxTxSeq) {
+                        maxTxSeq = seq;
+                    }
+
+                    // Check if this lot is a candidate for the current customer
+                    if (data.ownerCustomer === customer) {
+                        if (seq > highestCustomerSeq) {
+                            highestCustomerSeq = seq;
+                            activeLot = lotNum;
+                            activeLotProduced = data.totalProduced;
+                        }
+                    }
                 }
             }
         }
     });
 
+    // Use transaction history sequence if available; otherwise fallback to stored settings
+    let currentSeq = maxTxSeq > 0 ? maxTxSeq : settings.lotSequences[currentLevel];
+    if (currentSeq === 0) currentSeq = 10000; // Default safety
+
     const allocations: LotAllocation[] = [];
     let remainingToAllocate = cartonsNum;
-    let currentSeq = maxSeq;
 
     // 4a. Fill Active Lot First (if exists and has space)
     if (activeLot && activeLotProduced < maxCapacity) {
@@ -240,15 +261,11 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
     if (productId && cartons && parseFloat(cartons) > 0 && date && lotAllocations.length > 0) {
       
       // Construct final material linkage
-      const finalLinkage: Partial<Record<InventoryItemId, string>> = {};
+      const finalLinkage: Partial<Record<InventoryItemId, string[]>> = {};
       requiredTraceabilityItems.forEach(itemId => {
           const selection = materialSelection[itemId];
-          if (selection) {
-              if (selection.toLowerCase() === 'count') {
-                  finalLinkage[itemId] = customInputs[itemId] || 'Count (No ID)';
-              } else {
-                  finalLinkage[itemId] = selection;
-              }
+          if (selection && selection.length > 0) {
+              finalLinkage[itemId] = selection;
           }
       });
 
@@ -318,35 +335,44 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
                     {requiredTraceabilityItems.map(itemId => {
                          const item = ITEMS_MAP.get(itemId);
                          const stockIds = availableStockIds[itemId] || [];
-                         const selectedValue = materialSelection[itemId] || '';
-                         const isCountSelected = selectedValue.toLowerCase() === 'count';
+                         const selectedIds = materialSelection[itemId] || [];
 
                          return (
                              <div key={itemId} className="bg-gray-50 dark:bg-gray-700/30 p-3 rounded-md border border-gray-200 dark:border-gray-600">
-                                 <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1 truncate">
+                                 <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-2 truncate">
                                      {item?.name || itemId}
                                  </label>
-                                 <select
-                                     value={selectedValue}
-                                     onChange={e => setMaterialSelection(prev => ({ ...prev, [itemId]: e.target.value }))}
-                                     className="block w-full text-xs py-1.5 pl-2 pr-8 border-gray-300 rounded focus:ring-brand-red focus:border-brand-red dark:bg-gray-700 dark:border-gray-500 dark:text-white mb-2"
-                                 >
-                                     <option value="">-- Select Batch/Roll --</option>
-                                     {stockIds.map(id => (
-                                         <option key={id} value={id}>{id}</option>
-                                     ))}
-                                     <option value="Count">Count (Manual Adjustment)</option>
-                                 </select>
                                  
-                                 {isCountSelected && (
-                                     <input
-                                        type="text"
-                                        placeholder="Enter Manual Stock ID"
-                                        value={customInputs[itemId] || ''}
-                                        onChange={e => setCustomInputs(prev => ({ ...prev, [itemId]: e.target.value }))}
-                                        className="block w-full text-xs py-1.5 px-2 border-gray-300 rounded focus:ring-brand-red focus:border-brand-red dark:bg-gray-700 dark:border-gray-500 dark:text-white"
-                                     />
-                                 )}
+                                 {/* Selected Tags */}
+                                 <div className="flex flex-wrap gap-2 mb-2">
+                                     {selectedIds.length > 0 ? selectedIds.map(sid => (
+                                         <span key={sid} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-white dark:bg-gray-600 border border-gray-200 dark:border-gray-500 shadow-sm text-gray-700 dark:text-gray-200">
+                                             {sid}
+                                             <button
+                                                type="button"
+                                                onClick={() => handleRemoveStockId(itemId, sid)}
+                                                className="ml-1.5 text-gray-400 hover:text-red-500 focus:outline-none"
+                                             >
+                                                 <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+                                                     <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                                                 </svg>
+                                             </button>
+                                         </span>
+                                     )) : (
+                                         <span className="text-xs text-gray-400 italic mb-1">No batches selected</span>
+                                     )}
+                                 </div>
+
+                                 <select
+                                     value=""
+                                     onChange={e => handleAddStockId(itemId, e.target.value)}
+                                     className="block w-full text-xs py-1.5 pl-2 pr-8 border-gray-300 rounded focus:ring-brand-red focus:border-brand-red dark:bg-gray-700 dark:border-gray-500 dark:text-white"
+                                 >
+                                     <option value="" disabled>+ Add Batch/Roll</option>
+                                     {stockIds.map(id => (
+                                         <option key={id} value={id} disabled={selectedIds.includes(id)}>{id}</option>
+                                     ))}
+                                 </select>
                              </div>
                          );
                     })}

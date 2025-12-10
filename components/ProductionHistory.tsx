@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState } from 'react';
-import { Transaction, Customer, InventoryState } from '../types';
+import { Transaction, Customer, InventoryState, ProductId, InventoryItemId } from '../types';
 import { FINISHED_PRODUCTS } from '../constants';
 import { useInventory } from '../hooks/useInventory';
 import ConfirmationModal from './ConfirmationModal';
@@ -10,13 +10,13 @@ interface ProductionHistoryProps {
   transactions: Transaction[];
   updateTransaction: ReturnType<typeof useInventory>['updateTransaction'];
   deleteTransaction: ReturnType<typeof useInventory>['deleteTransaction'];
-  addTransaction: ReturnType<typeof useInventory>['addTransaction'];
   settings: ReturnType<typeof useInventory>['settings'];
   inventory: InventoryState;
 }
 
 type ProductionTransaction = Transaction & { 
     productName: string;
+    missingMaterials: boolean;
 };
 type SortKey = 'date' | 'orderNumber' | 'productName' | 'cartonsProduced';
 type SortDirection = 'asc' | 'desc';
@@ -50,9 +50,24 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
         const product = FINISHED_PRODUCTS.find(p => p.id === tx.productId);
         if (product) {
             if (!grouped[product.customer]) grouped[product.customer] = [];
+            
+            // Check for missing materials
+            let missingMaterials = false;
+            if (tx.productId) {
+                 const formula = settings.productFormulas[tx.productId as ProductId];
+                 if (formula) {
+                     const required = (Object.values(formula.rawMaterials) as InventoryItemId[]).filter(
+                        id => !settings.bypassedItems[id]
+                     );
+                     const linked = tx.materialLinkage ? Object.keys(tx.materialLinkage) : [];
+                     missingMaterials = required.some(reqId => !linked.includes(reqId));
+                 }
+            }
+
             grouped[product.customer].push({
                 ...tx,
                 productName: product.name,
+                missingMaterials
             });
         }
       });
@@ -79,7 +94,7 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
     });
 
     return grouped;
-  }, [transactions, sortConfig]);
+  }, [transactions, sortConfig, settings]);
 
   const confirmEdit = (updatedTx: Transaction) => {
       updateTransaction(updatedTx);
@@ -136,7 +151,8 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
                 onSave={confirmEdit}
                 settings={settings}
                 inventory={inventory}
-                transactions={transactions} // Pass full history for lot checks
+                transactions={transactions}
+                allowMaterialEditing={false}
             />
         )}
         <ConfirmationModal 
@@ -159,7 +175,7 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
         </div>
       </div>
       
-      {Object.entries(productionByCustomer).map(([customer, customerProduction]) => {
+      {(Object.entries(productionByCustomer) as [string, ProductionTransaction[]][]).map(([customer, customerProduction]) => {
          const totalCartons = customerProduction.reduce((sum, t) => sum + (t.cartonsShipped || 0), 0);
          
          if (customerProduction.length === 0) return null;
@@ -189,8 +205,15 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
                           {new Date(t.date).toLocaleDateString()}
                         </td>
-                         <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-300 font-mono min-w-[150px]">
+                         <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-300 font-mono min-w-[150px] flex items-center">
                              {t.orderNumber || '-'}
+                             {t.missingMaterials && (
+                                <span className="ml-2 text-amber-500" title="Missing Raw Material Linkage">
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                </span>
+                             )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
                           {t.productName}

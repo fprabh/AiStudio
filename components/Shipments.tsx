@@ -1,4 +1,3 @@
-
 import React, { useMemo, useState } from 'react';
 import { Transaction, Customer, ProductState, LotState } from '../types';
 import { FINISHED_PRODUCTS } from '../constants';
@@ -19,15 +18,8 @@ type ShipmentTransaction = Transaction & {
     productName: string;
     displayStatus?: 'normal' | 'deleted' | 'modified-original' | 'new';
 };
-type SortKey = 'date' | 'orderNumber' | 'productName' | 'cartonsShipped';
-type SortDirection = 'asc' | 'desc';
 
 const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, deleteTransaction, settings, productInventory, lotState }) => {
-  const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection }>({
-    key: 'date',
-    direction: 'desc',
-  });
-
   // Edit Mode State
   const [isEditMode, setIsEditMode] = useState(false);
   const [pendingDeletes, setPendingDeletes] = useState<Set<string>>(new Set());
@@ -37,43 +29,40 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
   const [showSaveConfirmation, setShowSaveConfirmation] = useState(false);
 
-  const handleSort = (key: SortKey) => {
-    setSortConfig((current) => ({
-      key,
-      direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc',
-    }));
-  };
+  // Pre-calculate DB stats for accurate "Available" calculation
+  const dbStats = useMemo(() => {
+    const stats: Record<string, number> = {}; // productId -> total shipped
+    transactions.forEach(t => {
+        if (t.type === 'SHIPMENT' && t.productId && t.cartonsShipped) {
+             stats[t.productId] = (stats[t.productId] || 0) + t.cartonsShipped;
+        }
+    });
+    return stats;
+  }, [transactions]);
 
   // Calculate Effective Lot State based on Pending Changes
-  // This ensures that if a user edits one shipment to use Lot A, the next edit sees Lot A decreased immediately.
   const effectiveLotState = useMemo(() => {
       const state = { ...lotState };
       
-      // 1. Handle Pending Updates (Revert Old, Apply New)
       pendingUpdates.forEach((updatedTx, id) => {
           const originalTx = transactions.find(t => t.id === id);
-          
-          // Revert original allocation (Add back to stock)
           if (originalTx && originalTx.type === 'SHIPMENT' && originalTx.lotAllocations) {
               Object.entries(originalTx.lotAllocations).forEach(([lot, qty]) => {
-                  state[lot] = (state[lot] || 0) + qty;
+                  state[lot] = (state[lot] ?? 0) + (qty as number);
               });
           }
-          
-          // Apply new allocation (Subtract from stock)
           if (updatedTx.type === 'SHIPMENT' && updatedTx.lotAllocations) {
                Object.entries(updatedTx.lotAllocations).forEach(([lot, qty]) => {
-                  state[lot] = (state[lot] || 0) - qty;
+                  state[lot] = (state[lot] || 0) - (qty as number);
               });
           }
       });
 
-      // 2. Handle Pending Deletes (Revert Old)
       pendingDeletes.forEach(id => {
           const originalTx = transactions.find(t => t.id === id);
            if (originalTx && originalTx.type === 'SHIPMENT' && originalTx.lotAllocations) {
               Object.entries(originalTx.lotAllocations).forEach(([lot, qty]) => {
-                  state[lot] = (state[lot] || 0) + qty;
+                  state[lot] = (state[lot] ?? 0) + (qty as number);
               });
           }
       });
@@ -82,20 +71,16 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
   }, [lotState, pendingUpdates, pendingDeletes, transactions]);
 
 
-  // Data Processing
+  // Data Processing - Group By Customer, then By Order Number (PO)
   const shipmentsByCustomer = useMemo<Record<string, ShipmentTransaction[]>>(() => {
     const grouped: Record<string, ShipmentTransaction[]> = {};
     const customers: Customer[] = ['PHSA', 'PADM', 'Alliance'];
     customers.forEach(c => grouped[c] = []);
 
-    // Create a display list combining original and pending updates
     transactions.filter(t => t.type === 'SHIPMENT' && t.productId).forEach(originalTx => {
-        // If this ID is in pendingUpdates, we need to show BOTH the original (struck) and new (highlighted)
-        
         const updatedTx = pendingUpdates.get(originalTx.id);
         const isDeleted = pendingDeletes.has(originalTx.id);
 
-        // 1. Process Original
         const originalProduct = FINISHED_PRODUCTS.find(p => p.id === originalTx.productId);
         if (originalProduct) {
             if (!grouped[originalProduct.customer]) grouped[originalProduct.customer] = [];
@@ -111,7 +96,6 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
             });
         }
 
-        // 2. Process Update (New Version)
         if (updatedTx) {
              const updatedProduct = FINISHED_PRODUCTS.find(p => p.id === updatedTx.productId);
              if (updatedProduct) {
@@ -125,77 +109,60 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
         }
     });
 
-    // Sort each group
+    // Final sorting for each customer: Date Desc, then PO Number
     Object.keys(grouped).forEach(customer => {
       grouped[customer].sort((a, b) => {
-        let comparison = 0;
-        switch (sortConfig.key) {
-          case 'date':
-            comparison = new Date(a.date).getTime() - new Date(b.date).getTime();
-            break;
-          case 'cartonsShipped':
-            comparison = (a.cartonsShipped || 0) - (b.cartonsShipped || 0);
-            break;
-          case 'productName':
-            comparison = a.productName.localeCompare(b.productName);
-            break;
-          case 'orderNumber':
-            comparison = (a.orderNumber || '').localeCompare(b.orderNumber || '');
-            break;
-        }
-        return sortConfig.direction === 'asc' ? comparison : -comparison;
+          const dateDiff = new Date(b.date).getTime() - new Date(a.date).getTime();
+          if (dateDiff !== 0) return dateDiff;
+          // If dates match, group by PO
+          return (a.orderNumber || '').localeCompare(b.orderNumber || '');
       });
     });
 
     return grouped;
-  }, [transactions, sortConfig, pendingDeletes, pendingUpdates]);
+  }, [transactions, pendingDeletes, pendingUpdates]);
+
+  const shipmentSummary = useMemo<Record<string, { total: number; products: Record<string, number> }>>(() => {
+    const summary: Record<string, { total: number; products: Record<string, number> }> = {};
+    
+    (Object.entries(shipmentsByCustomer) as [string, ShipmentTransaction[]][]).forEach(([customer, txs]) => {
+         const activeTxs = txs.filter(t => t.displayStatus !== 'deleted' && t.displayStatus !== 'modified-original');
+         if (activeTxs.length > 0) {
+             if (!summary[customer]) summary[customer] = { total: 0, products: {} };
+             activeTxs.forEach(t => {
+                 const qty = t.cartonsShipped || 0;
+                 summary[customer].total += qty;
+                 summary[customer].products[t.productName] = (summary[customer].products[t.productName] || 0) + qty;
+             });
+         }
+    });
+    return summary;
+  }, [shipmentsByCustomer]);
 
   // Actions
-  const initiateEdit = (tx: Transaction) => {
-      setEditingTransaction(tx);
-  };
-  
+  const initiateEdit = (tx: Transaction) => setEditingTransaction(tx);
   const confirmEdit = (updatedTx: Transaction) => {
       setPendingUpdates(prev => new Map(prev).set(updatedTx.id, updatedTx));
       setEditingTransaction(null);
   };
-
-  const initiateDelete = (id: string) => {
-      setItemToDelete(id);
-  };
-
+  const initiateDelete = (id: string) => setItemToDelete(id);
   const confirmDelete = () => {
       if (itemToDelete) {
           setPendingDeletes(prev => new Set(prev).add(itemToDelete));
-          // If it was updated pending, remove the update to just show deleted
           if (pendingUpdates.has(itemToDelete)) {
-              setPendingUpdates(prev => {
-                  const next = new Map(prev);
-                  next.delete(itemToDelete);
-                  return next;
-              });
+              setPendingUpdates(prev => { const next = new Map(prev); next.delete(itemToDelete); return next; });
           }
           setItemToDelete(null);
       }
   };
-
   const undoChange = (id: string) => {
       if (pendingDeletes.has(id)) {
-          setPendingDeletes(prev => {
-              const next = new Set(prev);
-              next.delete(id);
-              return next;
-          });
+          setPendingDeletes(prev => { const next = new Set(prev); next.delete(id); return next; });
       }
       if (pendingUpdates.has(id)) {
-          setPendingUpdates(prev => {
-              const next = new Map(prev);
-              next.delete(id);
-              return next;
-          });
+          setPendingUpdates(prev => { const next = new Map(prev); next.delete(id); return next; });
       }
   };
-
   const initiateSave = () => {
       if (pendingDeletes.size === 0 && pendingUpdates.size === 0) {
           setIsEditMode(false);
@@ -203,65 +170,23 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
       }
       setShowSaveConfirmation(true);
   };
-
   const performSave = () => {
       pendingDeletes.forEach(id => deleteTransaction(id));
       pendingUpdates.forEach(tx => updateTransaction(tx));
-      
       setIsEditMode(false);
       setPendingDeletes(new Set());
       setPendingUpdates(new Map());
       setShowSaveConfirmation(false);
   };
-
   const cancelAllChanges = () => {
       setIsEditMode(false);
       setPendingDeletes(new Set());
       setPendingUpdates(new Map());
   };
 
-  // Render Helpers
-  const renderSortIcon = (column: SortKey) => {
-    const isActive = sortConfig.key === column;
-    return (
-      <span className="ml-2 flex-none text-gray-400">
-        {!isActive ? (
-            <svg className="h-4 w-4 opacity-0 group-hover:opacity-50 transition-opacity" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M10 3a1 1 0 01.707.293l3 3a1 1 0 01-1.414 1.414L10 5.414 7.707 7.707a1 1 0 01-1.414-1.414l3-3A1 1 0 0110 3zm-3.707 9.293a1 1 0 011.414 0L10 14.586l2.293-2.293a1 1 0 011.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
-            </svg>
-        ) : sortConfig.direction === 'asc' ? (
-            <svg className="h-4 w-4 text-brand-red" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd" />
-            </svg>
-        ) : (
-            <svg className="h-4 w-4 text-brand-red" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-            </svg>
-        )}
-      </span>
-    );
-  };
-
-  const TableHeader = ({ label, column, align = 'left' }: { label: string; column: SortKey; align?: 'left' | 'right' }) => (
-    <th 
-        scope="col" 
-        className={`px-6 py-3 text-${align} text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer group hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors select-none`}
-        onClick={() => handleSort(column)}
-    >
-        <div className={`flex items-center ${align === 'right' ? 'justify-end' : 'justify-start'}`}>
-            {label}
-            {renderSortIcon(column)}
-        </div>
-    </th>
-  );
-  
   const getRowStyle = (status?: ShipmentTransaction['displayStatus']) => {
-      if (status === 'deleted' || status === 'modified-original') {
-          return "bg-gray-50 dark:bg-gray-800 opacity-60 text-gray-400 line-through hover:bg-gray-100";
-      }
-      if (status === 'new') {
-          return "bg-green-50 dark:bg-green-900/20 border-l-2 border-green-500";
-      }
+      if (status === 'deleted' || status === 'modified-original') return "bg-gray-50 dark:bg-gray-800 opacity-60 text-gray-400 line-through hover:bg-gray-100";
+      if (status === 'new') return "bg-green-50 dark:bg-green-900/20 border-l-2 border-green-500";
       return "hover:bg-gray-50 dark:hover:bg-gray-700/50";
   };
 
@@ -274,9 +199,9 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
                 onSave={confirmEdit}
                 settings={settings}
                 productInventory={productInventory}
-                inventory={undefined} // Not needed for shipments
-                transactions={transactions} // Pass all tx for lot calculation
-                lotState={effectiveLotState} // Pass computed state with pending edits
+                inventory={undefined}
+                transactions={transactions}
+                lotState={effectiveLotState}
             />
         )}
         <ConfirmationModal 
@@ -284,144 +209,196 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
             onClose={() => setItemToDelete(null)}
             onConfirm={confirmDelete}
             title="Mark for Deletion"
-            message="Are you sure you want to mark this record for deletion? You must click 'Save Changes' to apply."
+            message="Are you sure you want to mark this record for deletion?"
         />
         <ConfirmationModal 
             isOpen={showSaveConfirmation}
             onClose={() => setShowSaveConfirmation(false)}
             onConfirm={performSave}
             title="Confirm Changes"
-            message={`You are about to delete ${pendingDeletes.size} record(s) and update ${pendingUpdates.size} record(s). This action cannot be undone.`}
+            message={`You are about to delete ${pendingDeletes.size} record(s) and update ${pendingUpdates.size} record(s).`}
         />
 
       <div className="flex justify-between items-center">
         <h2 className="text-3xl font-bold text-gray-900 dark:text-white">Shipment History</h2>
         <div className="space-x-4">
             {!isEditMode ? (
-                <button 
-                    onClick={() => setIsEditMode(true)}
-                    className="px-4 py-2 bg-white border border-gray-300 dark:bg-gray-700 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-md shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 font-medium text-sm"
-                >
-                    Edit Table
-                </button>
+                <button onClick={() => setIsEditMode(true)} className="px-4 py-2 bg-white border border-gray-300 dark:bg-gray-700 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-md shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 font-medium text-sm">Edit Table</button>
             ) : (
                 <>
-                    <button 
-                        onClick={cancelAllChanges}
-                        className="px-4 py-2 bg-white border border-gray-300 dark:bg-gray-700 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-md shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 font-medium text-sm"
-                    >
-                        Cancel
-                    </button>
-                    <button 
-                        onClick={initiateSave}
-                        className="px-4 py-2 bg-brand-red text-white rounded-md shadow-sm hover:bg-red-700 font-medium text-sm"
-                    >
-                        Save Changes ({pendingDeletes.size + pendingUpdates.size})
-                    </button>
+                    <button onClick={cancelAllChanges} className="px-4 py-2 bg-white border border-gray-300 dark:bg-gray-700 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-md shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 font-medium text-sm">Cancel</button>
+                    <button onClick={initiateSave} className="px-4 py-2 bg-brand-red text-white rounded-md shadow-sm hover:bg-red-700 font-medium text-sm">Save Changes</button>
                 </>
             )}
         </div>
       </div>
+
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md mb-8 border-l-4 border-brand-red">
+          <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Total Shipments Overview</h3>
+          {Object.keys(shipmentSummary).length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {Object.entries(shipmentSummary).map(([customer, stats]: [string, { total: number; products: Record<string, number> }]) => (
+                    <div key={customer} className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
+                        <div className="flex justify-between items-center mb-3 pb-2 border-b border-gray-200 dark:border-gray-500">
+                            <h4 className="font-bold text-lg text-brand-dark dark:text-white">{customer}</h4>
+                            <span className="text-xs font-bold bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-2 py-0.5 rounded-full">{stats.total.toLocaleString()} Total</span>
+                        </div>
+                        <ul className="space-y-2">
+                            {Object.entries(stats.products).map(([product, qty]) => (
+                                <li key={product} className="flex justify-between items-center text-sm">
+                                    <span className="text-gray-600 dark:text-gray-300 font-medium">{product}</span>
+                                    <span className="font-mono font-bold text-gray-900 dark:text-white">{(qty as number).toLocaleString()}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                ))}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500 dark:text-gray-400 italic">No shipment data available.</p>
+          )}
+      </div>
       
-      {Object.entries(shipmentsByCustomer).map(([customer, customerShipments]) => {
-         const shipments = customerShipments as ShipmentTransaction[];
-         // For totals, don't count deleted, do count new, don't count modified-original
+      {(Object.entries(shipmentsByCustomer) as [string, ShipmentTransaction[]][]).map(([customer, shipments]) => {
          const activeShipments = shipments.filter(s => s.displayStatus !== 'deleted' && s.displayStatus !== 'modified-original');
          const totalCartons = activeShipments.reduce((sum, t) => sum + (t.cartonsShipped || 0), 0);
          
-         if (shipments.length === 0) return null;
+         const productStats = FINISHED_PRODUCTS.filter(p => p.customer === customer).map(product => {
+                const pid = product.id;
+                const currentDbStock = productInventory[pid] || 0;
+                const dbShipped = dbStats[pid] || 0;
+                const totalProduced = currentDbStock + dbShipped;
+                const activeShipped = activeShipments.filter(s => s.productId === pid).reduce((sum, s) => sum + (s.cartonsShipped || 0), 0);
+                return { id: pid, name: product.name, shipped: activeShipped, available: totalProduced - activeShipped };
+            });
+
+         if (shipments.length === 0 && productStats.length === 0) return null;
+
+         // Group for rendering table
+         const rowGroups: { date: string, orderNumber: string, rows: ShipmentTransaction[], totalQty: number }[] = [];
+         let currentGroup: typeof rowGroups[0] | null = null;
+
+         shipments.forEach(tx => {
+             const dateStr = new Date(tx.date).toLocaleDateString();
+             const orderStr = tx.orderNumber || '';
+             
+             // Check if we can merge with current group
+             if (currentGroup && currentGroup.date === dateStr && currentGroup.orderNumber === orderStr && orderStr !== '') {
+                 currentGroup.rows.push(tx);
+                 currentGroup.totalQty += (tx.cartonsShipped || 0);
+             } else {
+                 currentGroup = { date: dateStr, orderNumber: orderStr, rows: [tx], totalQty: (tx.cartonsShipped || 0) };
+                 rowGroups.push(currentGroup);
+             }
+         });
 
          return (
             <div key={customer} className="bg-white dark:bg-gray-800 shadow-md rounded-lg overflow-hidden mb-8">
               <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-700">
                 <h3 className="text-xl font-bold text-gray-900 dark:text-white">{customer}</h3>
-                <span className="inline-flex items-center px-3 py-0.5 rounded-full text-sm font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
-                  Total Shipped: {totalCartons.toLocaleString()} Cartons
-                </span>
+                <span className="inline-flex items-center px-3 py-0.5 rounded-full text-sm font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">Total: {totalCartons.toLocaleString()}</span>
               </div>
+              
+              <div className="bg-gray-50 dark:bg-gray-700/30 p-4 border-b border-gray-200 dark:border-gray-700">
+                    <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Product Summary (Current Stock)</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {productStats.map(stat => (
+                            <div key={stat.id} className="bg-white dark:bg-gray-800 p-3 rounded-md shadow-sm border border-gray-200 dark:border-gray-600">
+                                <div className="font-medium text-sm text-gray-900 dark:text-white mb-2 truncate" title={stat.name}>{stat.name}</div>
+                                <div className="grid grid-cols-2 gap-y-1 text-xs">
+                                    <span className="text-gray-500 dark:text-gray-400">Total Sent:</span>
+                                    <span className="text-right font-mono font-bold text-blue-600 dark:text-blue-400">{stat.shipped.toLocaleString()}</span>
+                                    <span className="text-gray-500 dark:text-gray-400">Available:</span>
+                                    <span className={`text-right font-mono font-bold ${stat.available < 0 ? 'text-red-600' : 'text-green-600 dark:text-green-400'}`}>{stat.available.toLocaleString()}</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+              </div>
+
               <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 border-collapse">
                   <thead className="bg-gray-50 dark:bg-gray-800">
                     <tr>
-                      <TableHeader label="Date" column="date" />
-                      <TableHeader label="Order #" column="orderNumber" />
-                      <TableHeader label="Product" column="productName" />
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Date</th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Order #</th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Product</th>
                       <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Lot Allocation</th>
-                      <TableHeader label="Cartons" column="cartonsShipped" align="right" />
+                      <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Cartons</th>
                       {isEditMode && <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>}
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {shipments.map((t, idx) => {
-                        const totalAllocated = t.lotAllocations 
-                            ? Object.values(t.lotAllocations).reduce((a,b) => a + b, 0) 
-                            : 0;
-                        const isAllocatedFully = totalAllocated === (t.cartonsShipped || 0);
+                    {rowGroups.map((group, gIdx) => (
+                        group.rows.map((t, idx) => {
+                            const isFirstInGroup = idx === 0;
+                            const totalAllocated = t.lotAllocations ? Object.values(t.lotAllocations).reduce((a: number, b: number) => a + b, 0) : 0;
+                            const isAllocatedFully = totalAllocated === (t.cartonsShipped || 0);
 
-                        return (
-                          <tr key={`${t.id}-${t.displayStatus}`} className={getRowStyle(t.displayStatus)}>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 align-top">
-                              {new Date(t.date).toLocaleDateString()}
-                            </td>
-                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 font-mono align-top">
-                              {t.orderNumber || '-'}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white align-top">
-                              {t.productName}
-                            </td>
-                            <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-300 align-top">
-                                {t.lotAllocations && Object.keys(t.lotAllocations).length > 0 ? (
-                                    <ul className="list-disc list-inside">
-                                        {Object.entries(t.lotAllocations).map(([lot, qty]) => (
-                                            <li key={lot}><span className="font-mono">{lot}</span>: <b>{qty}</b></li>
-                                        ))}
-                                        {!isAllocatedFully && (
-                                            <li className="text-red-500 list-none mt-1 flex items-center gap-1">
-                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-                                                 Partial ({totalAllocated}/{t.cartonsShipped})
-                                            </li>
-                                        )}
-                                    </ul>
-                                ) : (
-                                    <span className="flex items-center text-red-500 text-xs gap-1 bg-red-50 dark:bg-red-900/20 p-1 rounded w-fit">
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-                                        Missing Lot Info
-                                    </span>
-                                )}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 dark:text-white font-bold font-mono align-top">
-                              {t.cartonsShipped?.toLocaleString()}
-                            </td>
-                            {isEditMode && (
-                                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium align-top">
-                                    {t.displayStatus === 'deleted' || t.displayStatus === 'modified-original' ? (
-                                        <button onClick={() => undoChange(t.id)} className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300">Undo</button>
-                                    ) : (
-                                        <div className="flex justify-end space-x-3">
-                                            {t.displayStatus === 'new' && (
-                                                <button onClick={() => undoChange(t.id)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400">Revert</button>
-                                            )}
-                                            <button onClick={() => initiateEdit(t)} className="text-brand-red hover:text-red-900 dark:text-red-400 dark:hover:text-red-300">Edit</button>
-                                            <button onClick={() => initiateDelete(t.id)} className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200">Delete</button>
-                                        </div>
+                            return (
+                                <tr key={`${t.id}-${t.displayStatus}`} className={getRowStyle(t.displayStatus)}>
+                                    {/* Merged Columns for Date and Order # */}
+                                    {isFirstInGroup && (
+                                        <>
+                                            <td rowSpan={group.rows.length} className="px-6 py-4 text-sm text-gray-500 dark:text-gray-300 align-top border-r border-gray-100 dark:border-gray-700">
+                                                {group.date}
+                                            </td>
+                                            <td rowSpan={group.rows.length} className="px-6 py-4 text-sm text-gray-500 dark:text-gray-300 font-mono align-top border-r border-gray-100 dark:border-gray-700">
+                                                {group.orderNumber || '-'}
+                                                {group.rows.length > 1 && group.orderNumber && (
+                                                    <div className="text-[10px] bg-gray-100 dark:bg-gray-600 text-gray-500 dark:text-gray-300 px-1 rounded w-fit mt-1">
+                                                        Total: {group.totalQty}
+                                                    </div>
+                                                )}
+                                            </td>
+                                        </>
                                     )}
-                                </td>
-                            )}
-                          </tr>
-                        );
-                    })}
+                                    {/* Non-Merged Columns */}
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white align-top">
+                                        {t.productName}
+                                    </td>
+                                    <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-300 align-top">
+                                        {t.lotAllocations && Object.keys(t.lotAllocations).length > 0 ? (
+                                            <div className="flex flex-wrap gap-1">
+                                                {Object.entries(t.lotAllocations).map(([lot, qty]) => (
+                                                    <span key={lot} className="text-xs bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded border border-gray-200 dark:border-gray-600 whitespace-nowrap">
+                                                        <span className="font-mono font-bold">{lot}</span>: {qty}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <span className="text-red-500 text-xs italic">Missing Lot Info</span>
+                                        )}
+                                        {!isAllocatedFully && t.lotAllocations && (
+                                            <div className="text-red-500 text-[10px] mt-1">Partial Alloc</div>
+                                        )}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 dark:text-white font-bold font-mono align-top">
+                                        {t.cartonsShipped?.toLocaleString()}
+                                    </td>
+                                    {isEditMode && (
+                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium align-top">
+                                            {t.displayStatus === 'deleted' || t.displayStatus === 'modified-original' ? (
+                                                <button onClick={() => undoChange(t.id)} className="text-blue-600 hover:text-blue-900 dark:text-blue-400">Undo</button>
+                                            ) : (
+                                                <div className="flex justify-end space-x-3">
+                                                    {t.displayStatus === 'new' && <button onClick={() => undoChange(t.id)} className="text-gray-500 hover:text-gray-700">Revert</button>}
+                                                    <button onClick={() => initiateEdit(t)} className="text-brand-red hover:text-red-900 dark:text-red-400">Edit</button>
+                                                    <button onClick={() => initiateDelete(t.id)} className="text-gray-600 hover:text-gray-900 dark:text-gray-400">Delete</button>
+                                                </div>
+                                            )}
+                                        </td>
+                                    )}
+                                </tr>
+                            );
+                        })
+                    ))}
                   </tbody>
                 </table>
               </div>
             </div>
          );
       })}
-      
-      {Object.values(shipmentsByCustomer).every((arr) => (arr as ShipmentTransaction[]).length === 0) && (
-          <div className="text-center py-12 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-lg shadow-md">
-              <p>No shipments recorded yet.</p>
-          </div>
-      )}
     </div>
   );
 };

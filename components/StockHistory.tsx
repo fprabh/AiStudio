@@ -1,10 +1,11 @@
 
 import React, { useMemo, useState } from 'react';
-import { Transaction, Category, InventoryState } from '../types';
+import { Transaction, Category, InventoryState, InventoryItemId } from '../types';
 import { INVENTORY_ITEMS } from '../constants';
 import { useInventory } from '../hooks/useInventory';
 import EditTransactionModal from './EditTransactionModal';
 import ConfirmationModal from './ConfirmationModal';
+import StockUsageModal from './StockUsageModal';
 
 interface StockHistoryProps {
   transactions: Transaction[];
@@ -15,18 +16,23 @@ interface StockHistoryProps {
 }
 
 type StockTransaction = Transaction & { 
+    itemId: InventoryItemId;
     itemName: string; 
     category: Category; 
     unit: string; 
     quantity: number;
+    stockId?: string; 
     displayStatus?: 'normal' | 'deleted' | 'modified-original' | 'new';
 };
+
 type SortKey = 'date' | 'orderNumber' | 'itemName' | 'quantity';
 type SortDirection = 'asc' | 'desc';
 
 const ITEMS_MAP = new Map(INVENTORY_ITEMS.map(item => [item.id, item]));
 
 const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransaction, deleteTransaction, settings, inventory }) => {
+  const [viewMode, setViewMode] = useState<'byItem' | 'byDate'>('byItem');
+  
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection }>({
     key: 'date',
     direction: 'desc',
@@ -38,8 +44,14 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
   const [pendingUpdates, setPendingUpdates] = useState<Map<string, Transaction>>(new Map());
   
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
-  const [itemToDelete, setItemToDelete] = useState<string | null>(null);
+  const [idsToMerge, setIdsToMerge] = useState<string[]>([]); // For bulk edit merging
+  
+  const [itemsToDelete, setItemsToDelete] = useState<string[] | null>(null); // Changed to array for bulk delete
   const [showSaveConfirmation, setShowSaveConfirmation] = useState(false);
+
+  // Usage Modal State
+  const [usageModalData, setUsageModalData] = useState<{ stockId: string, itemId: InventoryItemId, itemName: string } | null>(null);
+
 
   const handleSort = (key: SortKey) => {
     setSortConfig((current) => ({
@@ -48,6 +60,7 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
     }));
   };
 
+  // --- DATA PROCESSING FOR 'BY ITEM' VIEW ---
   const stockByCategory = useMemo<Record<string, StockTransaction[]>>(() => {
     const grouped: Record<string, StockTransaction[]> = {};
     
@@ -68,10 +81,12 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
 
                      grouped[groupKey].push({
                          ...t,
+                         itemId: itemInfo.id,
                          itemName: itemInfo.name,
                          category: itemInfo.category,
                          unit: itemInfo.unit,
                          quantity: detail.quantity,
+                         stockId: detail.stockId,
                          displayStatus: status
                      });
                  }
@@ -104,7 +119,10 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
             comparison = a.itemName.localeCompare(b.itemName);
             break;
           case 'orderNumber':
-            comparison = (a.orderNumber || '').localeCompare(b.orderNumber || '');
+            // Comparison based on Stock ID if available, else Order Number
+            const aId = a.stockId || a.orderNumber || '';
+            const bId = b.stockId || b.orderNumber || '';
+            comparison = aId.localeCompare(bId);
             break;
         }
         return sortConfig.direction === 'asc' ? comparison : -comparison;
@@ -125,30 +143,135 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
     }, {} as Record<Category, Record<string, typeof INVENTORY_ITEMS>>);
   }, []);
 
-  const initiateEdit = (tx: Transaction) => {
-      setEditingTransaction(tx);
+  // --- DATA PROCESSING FOR 'BY DATE' VIEW ---
+  // Returns a list of "Display Groups".
+  // Each group has a header (PO or No PO) and a list of transactions to render merged.
+  const stockByDate = useMemo(() => {
+      // 1. First, organize by Date string
+      const byDate: Record<string, (Transaction & { displayStatus?: string })[]> = {};
+      
+      transactions.filter(t => t.type === 'IN').forEach(originalTx => {
+         const updatedTx = pendingUpdates.get(originalTx.id);
+         const isDeleted = pendingDeletes.has(originalTx.id);
+         
+         if (isDeleted) {
+             if(isEditMode) {
+                 const d = new Date(originalTx.date).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+                 if(!byDate[d]) byDate[d] = [];
+                 byDate[d].push({ ...originalTx, displayStatus: 'deleted' });
+             }
+         } else if (updatedTx) {
+             if(isEditMode) {
+                 const d1 = new Date(originalTx.date).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+                 if(!byDate[d1]) byDate[d1] = [];
+                 byDate[d1].push({ ...originalTx, displayStatus: 'modified-original' });
+             }
+             const d2 = new Date(updatedTx.date).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+             if(!byDate[d2]) byDate[d2] = [];
+             byDate[d2].push({ ...updatedTx, displayStatus: 'new' });
+         } else {
+             const d = new Date(originalTx.date).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+             if(!byDate[d]) byDate[d] = [];
+             byDate[d].push(originalTx);
+         }
+      });
+
+      // 2. Sort Dates
+      const sortedDates = Object.keys(byDate).sort((a,b) => new Date(b).getTime() - new Date(a).getTime());
+
+      // 3. Within each Date, group by PO for visual merging
+      const finalStructure: { dateStr: string, groups: { orderNumber: string, txs: (Transaction & { displayStatus?: string })[] }[] }[] = [];
+
+      sortedDates.forEach(dateStr => {
+          const txs = byDate[dateStr];
+          
+          const groupedByPO: Record<string, typeof txs> = {};
+          txs.forEach(tx => {
+              // Only group if PO exists. If no PO, keep separate by using ID in key.
+              if (tx.orderNumber) {
+                  const key = tx.orderNumber;
+                  if(!groupedByPO[key]) groupedByPO[key] = [];
+                  groupedByPO[key].push(tx);
+              } else {
+                  // Unique key for NO PO items so they don't merge
+                  const key = `__NO_PO_${tx.id}`;
+                  groupedByPO[key] = [tx];
+              }
+          });
+
+          // Convert back to array
+          const groups = Object.values(groupedByPO).map(groupTxs => ({
+              orderNumber: groupTxs[0].orderNumber || '', // Use common PO
+              txs: groupTxs
+          }));
+          finalStructure.push({ dateStr, groups });
+      });
+
+      return finalStructure;
+  }, [transactions, pendingUpdates, pendingDeletes, isEditMode]);
+
+
+  // Actions
+  const initiateEditGroup = (txs: Transaction[]) => {
+      if (txs.length === 0) return;
+
+      if (txs.length === 1) {
+          setEditingTransaction(txs[0]);
+          setIdsToMerge([]);
+          return;
+      }
+
+      // Merge logic: Combine details from all transactions into one
+      const base = txs[0];
+      const combinedDetails = txs.flatMap(t => t.details);
+      
+      const mergedTx: Transaction = {
+          ...base,
+          details: combinedDetails,
+          description: `Stock Received ${base.orderNumber ? `(PO: ${base.orderNumber})` : '(No PO)'}`
+      };
+
+      setIdsToMerge(txs.slice(1).map(t => t.id)); // Store IDs of subsumed transactions
+      setEditingTransaction(mergedTx);
   };
   
   const confirmEdit = (updatedTx: Transaction) => {
+      // Update the base transaction
       setPendingUpdates(prev => new Map(prev).set(updatedTx.id, updatedTx));
+      
+      // Mark subsumed transactions as deleted
+      if (idsToMerge.length > 0) {
+          setPendingDeletes(prev => {
+              const next = new Set(prev);
+              idsToMerge.forEach(id => next.add(id));
+              return next;
+          });
+          setIdsToMerge([]);
+      }
+
       setEditingTransaction(null);
   };
 
-  const initiateDelete = (id: string) => {
-      setItemToDelete(id);
+  const initiateDeleteGroup = (txs: Transaction[]) => {
+      setItemsToDelete(txs.map(t => t.id));
   };
 
   const confirmDelete = () => {
-      if (itemToDelete) {
-          setPendingDeletes(prev => new Set(prev).add(itemToDelete));
-          if (pendingUpdates.has(itemToDelete)) {
-              setPendingUpdates(prev => {
-                  const next = new Map(prev);
-                  next.delete(itemToDelete);
-                  return next;
-              });
-          }
-          setItemToDelete(null);
+      if (itemsToDelete && itemsToDelete.length > 0) {
+          setPendingDeletes(prev => {
+              const next = new Set(prev);
+              itemsToDelete.forEach(id => next.add(id));
+              return next;
+          });
+          
+          // If any were pending updates, remove them from updates map
+          setPendingUpdates(prev => {
+              const next = new Map(prev);
+              itemsToDelete.forEach(id => next.delete(id));
+              return next;
+          });
+
+          setItemsToDelete(null);
       }
   };
 
@@ -192,27 +315,6 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
       setPendingUpdates(new Map());
   };
 
-  const renderSortIcon = (column: SortKey) => {
-    const isActive = sortConfig.key === column;
-    return (
-      <span className="ml-2 flex-none text-gray-400">
-        {!isActive ? (
-            <svg className="h-4 w-4 opacity-0 group-hover:opacity-50 transition-opacity" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M10 3a1 1 0 01.707.293l3 3a1 1 0 01-1.414 1.414L10 5.414 7.707 7.707a1 1 0 01-1.414-1.414l3-3A1 1 0 0110 3zm-3.707 9.293a1 1 0 011.414 0L10 14.586l2.293-2.293a1 1 0 011.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
-            </svg>
-        ) : sortConfig.direction === 'asc' ? (
-            <svg className="h-4 w-4 text-brand-red" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd" />
-            </svg>
-        ) : (
-            <svg className="h-4 w-4 text-brand-red" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-            </svg>
-        )}
-      </span>
-    );
-  };
-
   const TableHeader = ({ label, column, align = 'left' }: { label: string; column: SortKey; align?: 'left' | 'right' }) => (
     <th 
         scope="col" 
@@ -221,12 +323,11 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
     >
         <div className={`flex items-center ${align === 'right' ? 'justify-end' : 'justify-start'}`}>
             {label}
-            {renderSortIcon(column)}
         </div>
     </th>
   );
 
-  const getRowStyle = (status?: StockTransaction['displayStatus']) => {
+  const getRowStyle = (status?: string) => {
       if (status === 'deleted' || status === 'modified-original') {
           return "bg-gray-50 dark:bg-gray-800 opacity-60 text-gray-400 line-through hover:bg-gray-100";
       }
@@ -241,18 +342,27 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
         {editingTransaction && (
             <EditTransactionModal
                 transaction={editingTransaction}
-                onClose={() => setEditingTransaction(null)}
+                onClose={() => { setEditingTransaction(null); setIdsToMerge([]); }}
                 onSave={confirmEdit}
                 settings={settings}
                 inventory={inventory}
             />
         )}
+        {usageModalData && (
+            <StockUsageModal 
+                stockId={usageModalData.stockId}
+                itemId={usageModalData.itemId}
+                itemName={usageModalData.itemName}
+                transactions={transactions}
+                onClose={() => setUsageModalData(null)}
+            />
+        )}
         <ConfirmationModal 
-            isOpen={!!itemToDelete}
-            onClose={() => setItemToDelete(null)}
+            isOpen={!!itemsToDelete}
+            onClose={() => setItemsToDelete(null)}
             onConfirm={confirmDelete}
             title="Mark for Deletion"
-            message="Are you sure you want to mark this record for deletion? You must click 'Save Changes' to apply."
+            message={`Are you sure you want to mark ${itemsToDelete?.length || 0} record(s) for deletion? You must click 'Save Changes' to apply.`}
         />
         <ConfirmationModal 
             isOpen={showSaveConfirmation}
@@ -262,15 +372,31 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
             message={`You are about to delete ${pendingDeletes.size} record(s) and update ${pendingUpdates.size} record(s). This action cannot be undone.`}
         />
 
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h2 className="text-3xl font-bold text-gray-900 dark:text-white">Incoming Stock History</h2>
-        <div className="space-x-4">
+        
+        <div className="flex items-center space-x-3">
+             <div className="bg-gray-100 dark:bg-gray-700 p-1 rounded-lg flex space-x-1">
+                <button
+                    onClick={() => setViewMode('byItem')}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${viewMode === 'byItem' ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                >
+                    By Item
+                </button>
+                <button
+                    onClick={() => setViewMode('byDate')}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${viewMode === 'byDate' ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                >
+                    By Date
+                </button>
+             </div>
+
              {!isEditMode ? (
                 <button 
                     onClick={() => setIsEditMode(true)}
                     className="px-4 py-2 bg-white border border-gray-300 dark:bg-gray-700 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-md shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 font-medium text-sm"
                 >
-                    Edit Table
+                    Edit
                 </button>
             ) : (
                 <>
@@ -284,15 +410,16 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
                         onClick={initiateSave}
                         className="px-4 py-2 bg-brand-red text-white rounded-md shadow-sm hover:bg-red-700 font-medium text-sm"
                     >
-                        Save Changes ({pendingDeletes.size + pendingUpdates.size})
+                        Save ({pendingDeletes.size + pendingUpdates.size})
                     </button>
                 </>
             )}
         </div>
       </div>
       
-      {Object.entries(groupedInventory).map(([category, subCategories]) => (
-        <div key={category} className="space-y-8">
+      {/* --- BY ITEM VIEW --- */}
+      {viewMode === 'byItem' && Object.entries(groupedInventory).map(([category, subCategories]) => (
+        <div key={category} className="space-y-8 animate-fade-in">
              <h2 className="text-2xl font-bold text-gray-800 dark:text-white sticky top-16 bg-gray-50 dark:bg-gray-900 py-2 z-10 border-b border-gray-200 dark:border-gray-700">{category}</h2>
              
              {Object.entries(subCategories)
@@ -322,44 +449,66 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
                                         <thead className="bg-gray-50 dark:bg-gray-800">
                                             <tr>
                                             <TableHeader label="Date" column="date" />
-                                            <TableHeader label="Order / Ref #" column="orderNumber" />
+                                            <TableHeader label="Stock ID / Ref" column="orderNumber" />
                                             <TableHeader label="Quantity" column="quantity" align="right" />
                                             {isEditMode && <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>}
                                             </tr>
                                         </thead>
                                         <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                                             {transactionsList.length > 0 ? (
-                                                transactionsList.map(t => (
-                                                <tr key={`${t.id}-${t.displayStatus}`} className={getRowStyle(t.displayStatus)}>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
-                                                    {new Date(t.date).toLocaleDateString()}
-                                                    </td>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 font-mono">
-                                                    {t.orderNumber || '-'}
-                                                    </td>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 dark:text-white font-bold font-mono">
-                                                    {t.quantity.toLocaleString()} <span className="text-xs text-gray-500 font-normal">{t.unit}</span>
-                                                    {t.description.match(/\((.*)\)/)?.[1] && (
-                                                        <div className="text-xs text-gray-400 font-normal mt-1">{t.description.match(/\((.*)\)/)?.[1]}</div>
-                                                    )}
-                                                    </td>
-                                                    {isEditMode && (
-                                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                                            {t.displayStatus === 'deleted' || t.displayStatus === 'modified-original' ? (
-                                                                <button onClick={() => undoChange(t.id)} className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300">Undo</button>
-                                                            ) : (
-                                                                <div className="flex justify-end space-x-3">
-                                                                    {t.displayStatus === 'new' && (
-                                                                        <button onClick={() => undoChange(t.id)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400">Revert</button>
+                                                transactionsList.map(t => {
+                                                    // Determine the best ID to show: specific line item StockID > Transaction OrderNumber (legacy)
+                                                    const displayId = t.stockId ? t.stockId : t.orderNumber;
+                                                    const secondaryId = t.stockId && t.orderNumber ? t.orderNumber : null; // Vendor PO if StockID exists
+
+                                                    return (
+                                                    <tr key={`${t.id}-${t.displayStatus}-${t.stockId || 'no-stock'}`} className={getRowStyle(t.displayStatus)}>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
+                                                        {new Date(t.date).toLocaleDateString()}
+                                                        </td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 font-mono">
+                                                            {t.category === 'Raw Materials' && displayId ? (
+                                                                <div>
+                                                                    <button 
+                                                                        onClick={() => setUsageModalData({ stockId: displayId!, itemId: t.itemId, itemName: t.itemName })}
+                                                                        className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 hover:underline font-mono font-medium focus:outline-none"
+                                                                        title="Click to trace usage"
+                                                                    >
+                                                                        {displayId}
+                                                                    </button>
+                                                                    {secondaryId && (
+                                                                        <div className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+                                                                            PO: {secondaryId}
+                                                                        </div>
                                                                     )}
-                                                                    <button onClick={() => initiateEdit(t)} className="text-brand-red hover:text-red-900 dark:text-red-400 dark:hover:text-red-300">Edit</button>
-                                                                    <button onClick={() => initiateDelete(t.id)} className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200">Delete</button>
                                                                 </div>
+                                                            ) : (
+                                                                displayId || '-'
                                                             )}
                                                         </td>
-                                                    )}
-                                                </tr>
-                                                ))
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 dark:text-white font-bold font-mono">
+                                                        {t.quantity.toLocaleString()} <span className="text-xs text-gray-500 font-normal">{t.unit}</span>
+                                                        {t.description.match(/\((.*)\)/)?.[1] && (
+                                                            <div className="text-xs text-gray-400 font-normal mt-1">{t.description.match(/\((.*)\)/)?.[1]}</div>
+                                                        )}
+                                                        </td>
+                                                        {isEditMode && (
+                                                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                                                {t.displayStatus === 'deleted' || t.displayStatus === 'modified-original' ? (
+                                                                    <button onClick={() => undoChange(t.id)} className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300">Undo</button>
+                                                                ) : (
+                                                                    <div className="flex justify-end space-x-3">
+                                                                        {t.displayStatus === 'new' && (
+                                                                            <button onClick={() => undoChange(t.id)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400">Revert</button>
+                                                                        )}
+                                                                        <button onClick={() => initiateEditGroup([t])} className="text-brand-red hover:text-red-900 dark:text-red-400 dark:hover:text-red-300">Edit</button>
+                                                                        <button onClick={() => initiateDeleteGroup([t])} className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200">Delete</button>
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                        )}
+                                                    </tr>
+                                                )})
                                             ) : (
                                                 <tr>
                                                     <td colSpan={isEditMode ? 4 : 3} className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400 italic">
@@ -376,8 +525,115 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
                      </div>
                 </div>
              ))}
-        </div>
-      ))}
+      </div>
+      )}
+
+      {/* --- BY DATE VIEW --- */}
+      {viewMode === 'byDate' && (
+          <div className="space-y-12 animate-fade-in">
+              {stockByDate.length > 0 ? stockByDate.map(({ dateStr, groups }) => (
+                  <div key={dateStr} className="relative">
+                      <div className="sticky top-20 z-10 mb-4 flex items-center">
+                          <div className="bg-brand-red text-white text-sm font-bold px-3 py-1 rounded-full shadow-md">
+                              {dateStr}
+                          </div>
+                          <div className="h-px bg-gray-300 dark:bg-gray-700 flex-grow ml-4"></div>
+                      </div>
+                      
+                      <div className="grid gap-6">
+                          {groups.map((group, gIdx) => {
+                              // If merging multiple transactions, we take the first one for primary status
+                              const primaryTx = group.txs[0];
+                              const allDetails = group.txs.flatMap(tx => tx.details);
+                              
+                              return (
+                              <div key={`${dateStr}-${group.orderNumber}-${gIdx}`} className={`bg-white dark:bg-gray-800 rounded-lg shadow-md border-l-4 overflow-hidden ${
+                                  primaryTx.displayStatus === 'deleted' ? 'border-gray-400 opacity-60' : 
+                                  primaryTx.displayStatus === 'new' ? 'border-green-500' : 'border-blue-500'
+                              }`}>
+                                  <div className="p-4 border-b border-gray-100 dark:border-gray-700 flex justify-between items-start bg-gray-50 dark:bg-gray-700/30">
+                                      <div>
+                                          <h4 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                                              {group.orderNumber ? (
+                                                  <>
+                                                    <span className="text-gray-500 dark:text-gray-400 text-sm font-normal">PO:</span>
+                                                    <span className="font-mono">{group.orderNumber}</span>
+                                                  </>
+                                              ) : (
+                                                  <span className="text-gray-500 dark:text-gray-400 italic">No Vendor PO</span>
+                                              )}
+                                              {primaryTx.displayStatus === 'new' && <span className="bg-green-100 text-green-800 text-[10px] px-1.5 py-0.5 rounded font-bold uppercase">New</span>}
+                                              {primaryTx.displayStatus === 'modified-original' && <span className="bg-yellow-100 text-yellow-800 text-[10px] px-1.5 py-0.5 rounded font-bold uppercase">Modified</span>}
+                                              {primaryTx.displayStatus === 'deleted' && <span className="bg-red-100 text-red-800 text-[10px] px-1.5 py-0.5 rounded font-bold uppercase">Deleted</span>}
+                                          </h4>
+                                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                              {group.txs.length > 1 ? `Merged ${group.txs.length} transactions` : primaryTx.description}
+                                          </p>
+                                      </div>
+                                      
+                                      {isEditMode && (
+                                          <div className="flex space-x-2">
+                                               {primaryTx.displayStatus === 'deleted' || primaryTx.displayStatus === 'modified-original' ? (
+                                                    <button onClick={() => undoChange(primaryTx.id)} className="text-sm text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 font-medium">Undo</button>
+                                                ) : (
+                                                    <>
+                                                        {primaryTx.displayStatus === 'new' && (
+                                                            <button onClick={() => undoChange(primaryTx.id)} className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 font-medium">Revert</button>
+                                                        )}
+                                                        <button onClick={() => initiateEditGroup(group.txs)} className="text-sm text-brand-red hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 font-medium">Edit</button>
+                                                        <button onClick={() => initiateDeleteGroup(group.txs)} className="text-sm text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200 font-medium">Delete</button>
+                                                    </>
+                                                )}
+                                          </div>
+                                      )}
+                                  </div>
+                                  
+                                  <div className="overflow-x-auto">
+                                      <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                          <thead className="bg-white dark:bg-gray-800">
+                                              <tr>
+                                                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Item</th>
+                                                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Stock ID / Notes</th>
+                                                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Quantity</th>
+                                              </tr>
+                                          </thead>
+                                          <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                              {allDetails.map((detail, idx) => {
+                                                  const item = ITEMS_MAP.get(detail.itemId);
+                                                  return (
+                                                      <tr key={`detail-${idx}`}>
+                                                          <td className="px-4 py-2 text-sm font-medium text-gray-900 dark:text-white">
+                                                              {item?.name || detail.itemName}
+                                                              <div className="text-xs text-gray-500 font-normal">{item?.category} - {item?.subCategory}</div>
+                                                          </td>
+                                                          <td className="px-4 py-2 text-sm text-gray-500 dark:text-gray-300">
+                                                              {(detail.stockId || (!detail.stockId && group.orderNumber)) && (
+                                                                  <div className="font-mono text-xs bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded w-fit mb-1">
+                                                                      {detail.stockId ? `ID: ${detail.stockId}` : `ID: ${group.orderNumber}`}
+                                                                  </div>
+                                                              )}
+                                                              {detail.notes && <div className="italic text-xs">{detail.notes}</div>}
+                                                          </td>
+                                                          <td className="px-4 py-2 text-sm text-right font-mono font-bold text-gray-900 dark:text-white">
+                                                              {detail.quantity} <span className="text-xs font-normal text-gray-500">{item?.unit}</span>
+                                                          </td>
+                                                      </tr>
+                                                  );
+                                              })}
+                                          </tbody>
+                                      </table>
+                                  </div>
+                              </div>
+                          )})}
+                      </div>
+                  </div>
+              )) : (
+                  <div className="text-center py-12 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-lg shadow-md">
+                      <p>No incoming stock history found.</p>
+                  </div>
+              )}
+          </div>
+      )}
     </div>
   );
 };

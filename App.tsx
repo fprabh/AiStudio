@@ -46,7 +46,6 @@ const App: React.FC = () => {
                   transactions={inventoryData.transactions} 
                   updateTransaction={inventoryData.updateTransaction}
                   deleteTransaction={inventoryData.deleteTransaction}
-                  addTransaction={inventoryData.addTransaction}
                   settings={inventoryData.settings}
                   inventory={inventoryData.inventory}
                />;
@@ -59,9 +58,23 @@ const App: React.FC = () => {
                   inventory={inventoryData.inventory}
                />;
       case 'lotHistory':
-        return <LotHistory transactions={inventoryData.transactions} settings={inventoryData.settings} />;
+        return <LotHistory 
+                  transactions={inventoryData.transactions} 
+                  settings={inventoryData.settings}
+                  lotMetadata={inventoryData.lotMetadata}
+                  updateLotMetadata={inventoryData.updateLotMetadata}
+                  updateTransaction={inventoryData.updateTransaction}
+                  deleteTransaction={inventoryData.deleteTransaction}
+                  inventory={inventoryData.inventory}
+               />;
       case 'addStock':
-        return <AddStockForm addStock={inventoryData.addStock} setView={setView} />;
+        return <AddStockForm 
+                  addStock={inventoryData.addStock} 
+                  setView={setView} 
+                  inventory={inventoryData.inventory}
+                  transactions={inventoryData.transactions}
+                  settings={inventoryData.settings}
+               />;
       case 'logProduction':
         return <LogProductionForm 
                   logProduction={inventoryData.logProduction} 
@@ -72,7 +85,8 @@ const App: React.FC = () => {
                />;
       case 'logShipment':
         return <LogShipmentForm 
-                logShipment={inventoryData.logShipment} 
+                logShipment={inventoryData.logShipment}
+                logBatchShipments={inventoryData.logBatchShipments}
                 setView={setView} 
                 inventory={inventoryData.productInventory} 
                 settings={inventoryData.settings}

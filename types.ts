@@ -25,12 +25,20 @@ export type InventoryState = Record<InventoryItemId, number>;
 export type ProductState = Record<ProductId, number>;
 export type LotState = Record<string, number>; // LotNumber -> Remaining Cartons
 
+export interface LotMetadata {
+    startDate?: string;
+    endDate?: string;
+    notes?: string;
+}
+
 export type TransactionType = 'IN' | 'OUT' | 'PRODUCTION' | 'SHIPMENT'; // Keeping OUT for legacy parsing safely
 
 export interface TransactionDetail {
   itemId: InventoryItemId;
   itemName: string;
   quantity: number;
+  stockId?: string; // The specific batch/roll identifier
+  notes?: string; // Line-item specific notes
 }
 
 export interface Transaction {
@@ -39,14 +47,14 @@ export interface Transaction {
   type: TransactionType;
   description: string;
   details: TransactionDetail[];
-  orderNumber?: string;
+  orderNumber?: string; // For IN -> Vendor PO, For PROD -> Lot #, For SHIP -> Customer PO
   // For PRODUCTION and SHIPMENT
   productId?: ProductId;
   cartonsShipped?: number; // Used for both produced count and shipped count
   // For SHIPMENT - Track which lots were used
   lotAllocations?: Record<string, number>; // LotNumber -> Quantity Used
   // For PRODUCTION - Track which Raw Material Stock IDs were used
-  materialLinkage?: Partial<Record<InventoryItemId, string>>; // ItemId -> StockID
+  materialLinkage?: Partial<Record<InventoryItemId, string[]>>; // ItemId -> Array of StockIDs
 }
 
 export type ProductId = 

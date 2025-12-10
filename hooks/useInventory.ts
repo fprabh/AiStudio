@@ -1,6 +1,6 @@
 
 import { useState, useEffect, useCallback } from 'react';
-import { InventoryState, ProductState, LotState, Transaction, InventoryItemId, ProductId, TransactionDetail, AppSettings } from '../types';
+import { InventoryState, ProductState, LotState, Transaction, InventoryItemId, ProductId, TransactionDetail, AppSettings, LotMetadata } from '../types';
 import { INITIAL_INVENTORY_STATE, INITIAL_PRODUCT_STATE, INVENTORY_ITEMS, DEDUCTION_RULES, FINISHED_PRODUCTS, DEFAULT_LOT_SIZE_BOXES } from '../constants';
 import { calculateDeductions } from '../utils';
 
@@ -77,18 +77,34 @@ export const useInventory = () => {
       
       const uniqueIds = new Set();
 
-      // Migration: Map legacy 'OUT' to 'PRODUCTION' and Deduplicate IDs
-      return loaded.map((t: Transaction) => {
+      return loaded.map((t: any) => {
           let mapped = t.type === 'OUT' ? { ...t, type: 'PRODUCTION' } : t;
           
-          // Fix: Ensure unique IDs for existing data to prevent bulk deletion
+          // Fix: Ensure unique IDs for existing data
           if (uniqueIds.has(mapped.id)) {
               mapped = { ...mapped, id: mapped.id + '-dup-' + Math.random().toString(36).substr(2, 5) };
           }
           uniqueIds.add(mapped.id);
+
+          // Migration: Convert legacy string materialLinkage to string array
+          if (mapped.materialLinkage) {
+              const linkage: any = {};
+              Object.entries(mapped.materialLinkage).forEach(([k, v]) => {
+                  linkage[k] = Array.isArray(v) ? v : [v];
+              });
+              mapped.materialLinkage = linkage;
+          }
+
           return mapped;
       });
     } catch (error) { return []; }
+  });
+
+  const [lotMetadata, setLotMetadata] = useState<Record<string, LotMetadata>>(() => {
+    try {
+        const saved = localStorage.getItem('inventoryLotMetadata');
+        return saved ? JSON.parse(saved) : {};
+    } catch (error) { return {}; }
   });
 
   const [settings, setSettings] = useState<AppSettings>(() => {
@@ -118,22 +134,21 @@ export const useInventory = () => {
                 newInventory[detail.itemId] = (newInventory[detail.itemId] || 0) + detail.quantity; // quantity is negative
             });
             // 2. Add Finished Good to Stock
-            newProductInventory[tx.productId] = (newProductInventory[tx.productId] || 0) + tx.cartonsShipped;
+            newProductInventory[tx.productId] = (newProductInventory[tx.productId] || 0) + (tx.cartonsShipped || 0);
 
             // 3. Update Lot State (Add Production)
             if (tx.orderNumber) {
-                // Initialize with 0 if undefined, then add
-                newLotState[tx.orderNumber] = (newLotState[tx.orderNumber] || 0) + tx.cartonsShipped;
+                newLotState[tx.orderNumber] = (newLotState[tx.orderNumber] || 0) + (tx.cartonsShipped || 0);
             }
 
         } else if (tx.type === 'SHIPMENT' && tx.productId && tx.cartonsShipped) {
             // 1. Deduct Finished Good from Stock
-             newProductInventory[tx.productId] = (newProductInventory[tx.productId] || 0) - tx.cartonsShipped;
+             newProductInventory[tx.productId] = (newProductInventory[tx.productId] || 0) - (tx.cartonsShipped || 0);
 
             // 2. Deduct from Lot State if allocations exist
             if (tx.lotAllocations) {
                 Object.entries(tx.lotAllocations).forEach(([lotNumber, qty]) => {
-                    newLotState[lotNumber] = (newLotState[lotNumber] || 0) - qty;
+                    newLotState[lotNumber] = (newLotState[lotNumber] || 0) - (qty as number);
                 });
             }
         }
@@ -149,32 +164,49 @@ export const useInventory = () => {
     try {
       localStorage.setItem('transactions', JSON.stringify(transactions));
       localStorage.setItem('inventoryAppSettings', JSON.stringify(settings));
+      localStorage.setItem('inventoryLotMetadata', JSON.stringify(lotMetadata));
     } catch (error) {
       console.error('Error saving state to localStorage', error);
     }
-  }, [transactions, settings]);
+  }, [transactions, settings, lotMetadata]);
   
   const updateSettings = useCallback((newSettings: Partial<AppSettings>) => {
       setSettings(prev => ({...prev, ...newSettings}));
   }, []);
 
-  const addStock = useCallback((itemId: InventoryItemId, quantity: number, notes: string, orderNumber: string, date?: string) => {
-    const item = ITEMS_MAP.get(itemId);
-    if (!item) return;
+  const updateLotMetadata = useCallback((lotNumber: string, meta: LotMetadata) => {
+      setLotMetadata(prev => ({
+          ...prev,
+          [lotNumber]: { ...prev[lotNumber], ...meta }
+      }));
+  }, []);
+
+  const addStock = useCallback((vendorPO: string, date: string, items: Array<{itemId: InventoryItemId, quantity: number, stockId: string, notes: string}>) => {
+    if (items.length === 0) return;
 
     const newTransaction: Transaction = {
       id: generateId(),
-      date: date ? new Date(date).toISOString() : new Date().toISOString(),
+      date: new Date(date).toISOString(),
       type: 'IN',
-      description: `Stock Received: ${item.name} ${notes ? `(${notes})` : ''}`,
-      details: [{ itemId, itemName: item.name, quantity }],
-      orderNumber: orderNumber || undefined,
+      description: `Stock Received ${vendorPO ? `(PO: ${vendorPO})` : '(No PO)'}`,
+      orderNumber: vendorPO || undefined,
+      details: items.map(item => {
+        const itemInfo = ITEMS_MAP.get(item.itemId);
+        return {
+          itemId: item.itemId,
+          itemName: itemInfo?.name || 'Unknown Item',
+          quantity: item.quantity,
+          stockId: item.stockId || undefined,
+          notes: item.notes || undefined,
+        }
+      }),
     };
 
     setTransactions(prev => [newTransaction, ...prev]);
   }, []);
 
-  const logProduction = useCallback((productId: ProductId, cartonsProduced: number, orderNumber: string, date?: string, materialLinkage?: Partial<Record<InventoryItemId, string>>) => {
+
+  const logProduction = useCallback((productId: ProductId, cartonsProduced: number, orderNumber: string, date?: string, materialLinkage?: Partial<Record<InventoryItemId, string[]>>) => {
     const product = FINISHED_PRODUCTS.find(p => p.id === productId);
     if (!product) return;
 
@@ -210,6 +242,32 @@ export const useInventory = () => {
       };
       setTransactions(prev => [newTransaction, ...prev]);
   }, []);
+
+  const logBatchShipments = useCallback((items: Array<{productId: ProductId, cartons: number, allocations?: Record<string, number>}>, orderNumber: string, date?: string) => {
+        const newTransactions: Transaction[] = [];
+        const txDate = date ? new Date(date).toISOString() : new Date().toISOString();
+
+        items.forEach(item => {
+            const product = FINISHED_PRODUCTS.find(p => p.id === item.productId);
+            if (!product) return;
+
+            newTransactions.push({
+                id: generateId(), // Unique ID for each line item
+                date: txDate,
+                type: 'SHIPMENT',
+                description: `Shipment: ${item.cartons} carton(s) of ${product.name} to ${product.customer}`,
+                details: [],
+                orderNumber: orderNumber || undefined,
+                productId: item.productId,
+                cartonsShipped: item.cartons,
+                lotAllocations: item.allocations || undefined
+            });
+        });
+
+        if (newTransactions.length > 0) {
+            setTransactions(prev => [...newTransactions, ...prev]);
+        }
+  }, []);
     
     const deleteTransaction = useCallback((transactionId: string) => {
         setTransactions(prev => prev.filter(t => t.id !== transactionId));
@@ -219,39 +277,27 @@ export const useInventory = () => {
         setTransactions(prev => prev.map(t => t.id === updatedTx.id ? updatedTx : t));
     }, []);
     
-    // For raw inserts (e.g. splitting transactions)
     const addTransaction = useCallback((transaction: Transaction) => {
         setTransactions(prev => [transaction, ...prev]);
     }, []);
 
   const exportData = useCallback(() => {
-    // Ensure export does not contain calculated details for PRODUCTION or SHIPMENT, only metadata.
     const cleanTransactions = transactions.map(t => {
-        // Cast to any to allow adding temporary properties like lotNumber
         const exportTx: any = { ...t };
-
         if (t.type === 'PRODUCTION' || t.type === 'OUT' || t.type === 'SHIPMENT') {
             exportTx.details = [];
         }
-
-        // Rename orderNumber to lotNumber for PRODUCTION records to distinguish from Shipment POs
         if (t.type === 'PRODUCTION' && exportTx.orderNumber) {
             exportTx.lotNumber = exportTx.orderNumber;
             delete exportTx.orderNumber;
         }
-
-        // Rename orderNumber to stockId for IN records to distinguish from Shipment POs
-        if (t.type === 'IN' && exportTx.orderNumber) {
-            exportTx.stockId = exportTx.orderNumber;
-            delete exportTx.orderNumber;
-        }
-
         return exportTx;
     });
 
     const data = {
       transactions: cleanTransactions,
       settings,
+      lotMetadata
     };
     const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(data, null, 2))}`;
     const link = document.createElement('a');
@@ -259,7 +305,7 @@ export const useInventory = () => {
     const date = new Date().toISOString().slice(0, 10);
     link.download = `inventory-backup-${date}.json`;
     link.click();
-  }, [transactions, settings]);
+  }, [transactions, settings, lotMetadata]);
 
   const importData = useCallback((jsonData: string): Promise<void> => {
     return new Promise((resolve, reject) => {
@@ -270,15 +316,15 @@ export const useInventory = () => {
                 const migratedTransactions = data.transactions.map((t: any) => {
                     let mapped = t.type === 'OUT' ? { ...t, type: 'PRODUCTION' } : { ...t };
                     
-                    // Map lotNumber back to orderNumber for PRODUCTION records
                     if (mapped.type === 'PRODUCTION' && mapped.lotNumber) {
                         mapped.orderNumber = mapped.lotNumber;
                         delete mapped.lotNumber;
                     }
 
-                    // Map stockId back to orderNumber for IN records
                     if (mapped.type === 'IN' && mapped.stockId) {
-                        mapped.orderNumber = mapped.stockId;
+                        if (!mapped.orderNumber) {
+                            mapped.orderNumber = mapped.stockId;
+                        }
                         delete mapped.stockId;
                     }
 
@@ -286,10 +332,23 @@ export const useInventory = () => {
                         mapped = { ...mapped, id: mapped.id + '-dup-' + Math.random().toString(36).substr(2, 5) };
                     }
                     uniqueIds.add(mapped.id);
+
+                    // Migration for imported data as well
+                    if (mapped.materialLinkage) {
+                        const linkage: any = {};
+                        Object.entries(mapped.materialLinkage).forEach(([k, v]) => {
+                            linkage[k] = Array.isArray(v) ? v : [v];
+                        });
+                        mapped.materialLinkage = linkage;
+                    }
+
                     return mapped;
                 });
                 setTransactions(migratedTransactions);
                 setSettings(mergeSettings(data.settings || {}));
+                if (data.lotMetadata) {
+                    setLotMetadata(data.lotMetadata);
+                }
                 resolve();
             } else {
                 reject(new Error('Invalid backup file. The "transactions" data is missing.'));
@@ -300,5 +359,5 @@ export const useInventory = () => {
     });
   }, []);
 
-  return { inventory, productInventory, lotState, transactions, settings, updateSettings, addStock, logProduction, logShipment, exportData, importData, deleteTransaction, updateTransaction, addTransaction };
+  return { inventory, productInventory, lotState, transactions, settings, lotMetadata, updateSettings, updateLotMetadata, addStock, logProduction, logShipment, logBatchShipments, exportData, importData, deleteTransaction, updateTransaction, addTransaction };
 };

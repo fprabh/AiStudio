@@ -1,11 +1,36 @@
 
 import React, { useMemo, useState } from 'react';
-import { Transaction, ProductId, AppSettings, Customer, InventoryItemId } from '../types';
+import { Transaction, ProductId, AppSettings, Customer, InventoryItemId, InventoryState, LotMetadata } from '../types';
 import { FINISHED_PRODUCTS, getProductLotConfig, INVENTORY_ITEMS } from '../constants';
+import EditLotModal from './EditLotModal';
+import { useInventory } from '../hooks/useInventory';
 
 interface LotHistoryProps {
   transactions: Transaction[];
   settings: AppSettings;
+  lotMetadata: Record<string, LotMetadata>;
+  updateLotMetadata: (lotNumber: string, meta: LotMetadata) => void;
+  updateTransaction: ReturnType<typeof useInventory>['updateTransaction'];
+  deleteTransaction: ReturnType<typeof useInventory>['deleteTransaction'];
+  inventory: InventoryState;
+}
+
+export interface LotAggregated {
+    lotNumber: string;
+    productIds: string[]; 
+    productNames: string[];
+    customer: Customer | 'Unknown';
+    startDate: string; // From Metadata
+    endDate: string;   // From Metadata
+    producedQty: number;
+    shippedQty: number;
+    remainingQty: number; // In Stock
+    maxCapacity: number;
+    remainingToProduce: number;
+    status: 'Active' | 'Depleted' | 'Unknown';
+    shipments: ShipmentInfo[];
+    materials: Record<InventoryItemId, Set<string>>; // Linked Raw Materials
+    missingMaterials: boolean;
 }
 
 interface ShipmentInfo {
@@ -16,28 +41,12 @@ interface ShipmentInfo {
     orderNumber?: string;
 }
 
-interface LotAggregated {
-    lotNumber: string;
-    productId: string;
-    productName: string;
-    customer: Customer | 'Unknown';
-    startDate: string; // First Production Date
-    endDate: string;   // Last Production Date
-    producedQty: number;
-    shippedQty: number;
-    remainingQty: number; // In Stock
-    maxCapacity: number;
-    remainingToProduce: number;
-    status: 'Active' | 'Depleted' | 'Unknown';
-    shipments: ShipmentInfo[];
-    materials: Record<InventoryItemId, Set<string>>; // Linked Raw Materials
-}
-
 const ITEMS_MAP = new Map(INVENTORY_ITEMS.map(item => [item.id, item]));
 
-const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings }) => {
+const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings, lotMetadata, updateLotMetadata, updateTransaction, deleteTransaction, inventory }) => {
     const [expandedLot, setExpandedLot] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
+    const [editingLot, setEditingLot] = useState<LotAggregated | null>(null);
 
     const lotData = useMemo(() => {
         const lots: Record<string, LotAggregated> = {};
@@ -45,8 +54,10 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings }) => {
         // 1. Process Production Logs
         transactions.forEach(tx => {
             if ((tx.type === 'PRODUCTION' || tx.type === 'OUT') && tx.orderNumber) {
+                const product = FINISHED_PRODUCTS.find(p => p.id === tx.productId);
+                const lotMeta = lotMetadata[tx.orderNumber] || {};
+                
                 if (!lots[tx.orderNumber]) {
-                    const product = FINISHED_PRODUCTS.find(p => p.id === tx.productId);
                     let maxCapacity = 0;
                     if (tx.productId) {
                          try {
@@ -56,11 +67,11 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings }) => {
 
                     lots[tx.orderNumber] = {
                         lotNumber: tx.orderNumber,
-                        productId: tx.productId || '',
-                        productName: product?.name || 'Unknown Product',
+                        productIds: [],
+                        productNames: [],
                         customer: product?.customer || 'Unknown',
-                        startDate: tx.date,
-                        endDate: tx.date,
+                        startDate: lotMeta.startDate || '',
+                        endDate: lotMeta.endDate || '',
                         producedQty: 0,
                         shippedQty: 0,
                         remainingQty: 0,
@@ -68,26 +79,33 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings }) => {
                         remainingToProduce: 0,
                         status: 'Active',
                         shipments: [],
-                        materials: {} as Record<InventoryItemId, Set<string>>
+                        materials: {} as Record<InventoryItemId, Set<string>>,
+                        missingMaterials: false
                     };
                 }
-                lots[tx.orderNumber].producedQty += (tx.cartonsShipped || 0);
-                
-                // Date logic
-                if (new Date(tx.date) < new Date(lots[tx.orderNumber].startDate)) {
-                    lots[tx.orderNumber].startDate = tx.date;
+
+                // Add Product Info if not exists
+                if (tx.productId && !lots[tx.orderNumber].productIds.includes(tx.productId)) {
+                    lots[tx.orderNumber].productIds.push(tx.productId);
                 }
-                if (new Date(tx.date) > new Date(lots[tx.orderNumber].endDate)) {
-                    lots[tx.orderNumber].endDate = tx.date;
+                if (product && !lots[tx.orderNumber].productNames.includes(product.name)) {
+                    lots[tx.orderNumber].productNames.push(product.name);
                 }
 
-                // Material Linkage Aggregation
+                lots[tx.orderNumber].producedQty += (tx.cartonsShipped || 0);
+                
+                // Note: We deliberately do NOT update startDate/endDate from transactions anymore, per requirements.
+
+                // Material Linkage Aggregation (Updated for Arrays)
                 if (tx.materialLinkage) {
-                    Object.entries(tx.materialLinkage).forEach(([itemId, stockId]) => {
+                    Object.entries(tx.materialLinkage).forEach(([itemId, stockIds]) => {
+                        const ids = Array.isArray(stockIds) ? stockIds : [stockIds as string];
                         if (!lots[tx.orderNumber!].materials[itemId as InventoryItemId]) {
                             lots[tx.orderNumber!].materials[itemId as InventoryItemId] = new Set();
                         }
-                        lots[tx.orderNumber!].materials[itemId as InventoryItemId].add(stockId);
+                        ids.forEach(sid => {
+                            lots[tx.orderNumber!].materials[itemId as InventoryItemId].add(sid);
+                        });
                     });
                 }
             }
@@ -96,10 +114,11 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings }) => {
         // 2. Process Shipment Logs
         transactions.forEach(tx => {
             if (tx.type === 'SHIPMENT' && tx.lotAllocations) {
-                Object.entries(tx.lotAllocations).forEach(([lotId, qty]) => {
+                (Object.entries(tx.lotAllocations) as [string, number][]).forEach(([lotId, qty]) => {
                      if (!lots[lotId]) {
                         // Found a shipment for a lot we don't have a production record for (e.g., legacy data)
                         const product = FINISHED_PRODUCTS.find(p => p.id === tx.productId);
+                        const lotMeta = lotMetadata[lotId] || {};
                         let maxCapacity = 0;
                         if (tx.productId) {
                              try {
@@ -109,11 +128,11 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings }) => {
 
                         lots[lotId] = {
                             lotNumber: lotId,
-                            productId: tx.productId || '',
-                            productName: product?.name || 'Unknown',
+                            productIds: [],
+                            productNames: [],
                             customer: product?.customer || 'Unknown',
-                            startDate: 'N/A', 
-                            endDate: 'N/A',
+                            startDate: lotMeta.startDate || '', 
+                            endDate: lotMeta.endDate || '',
                             producedQty: 0, 
                             shippedQty: 0,
                             remainingQty: 0,
@@ -121,9 +140,20 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings }) => {
                             remainingToProduce: 0,
                             status: 'Unknown',
                             shipments: [],
-                            materials: {} as Record<InventoryItemId, Set<string>>
+                            materials: {} as Record<InventoryItemId, Set<string>>,
+                            missingMaterials: false
                         };
                      }
+
+                     // Add Product Info from shipment if missing (legacy case)
+                     if (tx.productId && !lots[lotId].productIds.includes(tx.productId)) {
+                        lots[lotId].productIds.push(tx.productId);
+                        const pName = FINISHED_PRODUCTS.find(p => p.id === tx.productId)?.name;
+                        if (pName && !lots[lotId].productNames.includes(pName)) {
+                            lots[lotId].productNames.push(pName);
+                        }
+                     }
+
                      lots[lotId].shippedQty += qty;
                      lots[lotId].shipments.push({
                          id: tx.id,
@@ -136,7 +166,7 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings }) => {
             }
         });
 
-        // 3. Calculate Remaining & Status
+        // 3. Calculate Remaining & Status & Missing Materials
         return Object.values(lots).map(lot => {
             lot.remainingQty = lot.producedQty - lot.shippedQty;
             lot.remainingToProduce = Math.max(0, lot.maxCapacity - lot.producedQty);
@@ -149,18 +179,43 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings }) => {
                 lot.status = 'Active';
             }
             
+            // Check Missing Materials for ALL products in this lot
+            // If any product requires materials but none are linked, mark as missing.
+            lot.missingMaterials = false;
+            if (lot.producedQty > 0) {
+                for (const pid of lot.productIds) {
+                     if (settings.productFormulas[pid as ProductId]) {
+                        const formula = settings.productFormulas[pid as ProductId];
+                        const required = (Object.values(formula.rawMaterials) as InventoryItemId[]).filter(
+                            id => !settings.bypassedItems[id]
+                        );
+                        const hasMissing = required.some(reqId => !lot.materials[reqId]);
+                        if (hasMissing) {
+                            lot.missingMaterials = true;
+                            break;
+                        }
+                     }
+                }
+            }
+
             // Sort shipments by date (newest first)
             lot.shipments.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
             
             return lot;
         }).sort((a, b) => {
-            // Sort lots by date produced desc
-            if (a.startDate === 'N/A') return 1;
-            if (b.startDate === 'N/A') return -1;
+            // Sort lots by date produced desc, prioritize lots with dates
+            if (!a.startDate && !b.startDate) {
+                // Fallback to numeric sequence sort if no date
+                 const seqA = parseInt(a.lotNumber.split('-')[1]?.trim() || '0');
+                 const seqB = parseInt(b.lotNumber.split('-')[1]?.trim() || '0');
+                 return seqB - seqA;
+            }
+            if (!a.startDate) return 1;
+            if (!b.startDate) return -1;
             return new Date(b.startDate).getTime() - new Date(a.startDate).getTime();
         });
 
-    }, [transactions, settings]);
+    }, [transactions, settings, lotMetadata]);
 
     const activeLotsOverview = useMemo(() => {
         // Define distinct overview cards
@@ -199,7 +254,7 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings }) => {
 
     const filteredLots = lotData.filter(l => 
         l.lotNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        l.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        l.productNames.some(name => name.toLowerCase().includes(searchTerm.toLowerCase())) ||
         l.customer.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
@@ -207,15 +262,38 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings }) => {
         setExpandedLot(prev => prev === lotId ? null : lotId);
     };
 
+    const handleSaveChanges = (updated: Transaction[], deletedIds: string[], lotMeta: LotMetadata) => {
+        updated.forEach(tx => updateTransaction(tx));
+        deletedIds.forEach(id => deleteTransaction(id));
+        
+        // Update Metadata
+        if (editingLot) {
+            updateLotMetadata(editingLot.lotNumber, lotMeta);
+        }
+        
+        setEditingLot(null);
+    };
+
     const formatDateRange = (start: string, end: string) => {
-        if (start === 'N/A') return 'N/A';
+        if (!start) return <span className="text-gray-400 italic">Set Date</span>;
         const s = new Date(start).toLocaleDateString();
+        if (!end) return <span>{s} - <span className="text-gray-400 italic">...</span></span>;
         const e = new Date(end).toLocaleDateString();
         return s === e ? s : `${s} - ${e}`;
     };
 
     return (
         <div className="space-y-8">
+            {editingLot && (
+                <EditLotModal
+                    lot={editingLot}
+                    allTransactions={transactions}
+                    settings={settings}
+                    inventory={inventory}
+                    onClose={() => setEditingLot(null)}
+                    onSave={handleSaveChanges}
+                />
+            )}
              <div>
                 <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">Lot Traceability</h2>
                 
@@ -241,11 +319,18 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings }) => {
                                 </div>
                                 {lot ? (
                                     <div className="mt-1">
-                                        <div className="text-lg font-mono font-semibold text-brand-dark dark:text-white mb-1">
+                                        <div className="text-lg font-mono font-semibold text-brand-dark dark:text-white mb-1 flex items-center">
                                             {lot.lotNumber}
+                                            {lot.missingMaterials && (
+                                                <span className="ml-2 text-amber-500" title="Missing Raw Material Linkage">
+                                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                                    </svg>
+                                                </span>
+                                            )}
                                         </div>
                                         <div className="text-xs text-gray-500 dark:text-gray-400 truncate mb-2">
-                                            Since: {new Date(lot.startDate).toLocaleDateString()}
+                                            Since: {lot.startDate ? new Date(lot.startDate).toLocaleDateString() : 'N/A'}
                                         </div>
                                         <div className="pt-2 border-t border-gray-100 dark:border-gray-700">
                                             <div className="w-full bg-gray-200 rounded-full h-1.5 dark:bg-gray-700 mb-1">
@@ -298,7 +383,7 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings }) => {
                         <tr>
                             <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Lot Number</th>
                             <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Date Range</th>
-                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Product</th>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Products</th>
                             <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Produced / Max</th>
                             <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Shipped</th>
                             <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">In Stock</th>
@@ -311,17 +396,25 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings }) => {
                             filteredLots.map((lot) => (
                                 <React.Fragment key={lot.lotNumber}>
                                     <tr 
-                                        onClick={() => toggleExpand(lot.lotNumber)}
-                                        className={`cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors ${expandedLot === lot.lotNumber ? 'bg-gray-50 dark:bg-gray-700/50' : ''}`}
+                                        className={`transition-colors ${expandedLot === lot.lotNumber ? 'bg-gray-50 dark:bg-gray-700/50' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
                                     >
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-medium text-brand-red dark:text-red-400">
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-medium text-brand-red dark:text-red-400 flex items-center">
                                             {lot.lotNumber}
+                                            {lot.missingMaterials && (
+                                                <span className="ml-2 text-amber-500" title="Missing Raw Material Linkage">
+                                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                                    </svg>
+                                                </span>
+                                            )}
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-500 dark:text-gray-300">
                                             {formatDateRange(lot.startDate, lot.endDate)}
                                         </td>
                                         <td className="px-6 py-4 text-sm text-gray-900 dark:text-white">
-                                            <div className="font-medium">{lot.productName}</div>
+                                            <div className="font-medium max-w-xs break-words">
+                                                {lot.productNames.join(', ')}
+                                            </div>
                                             <div className="text-xs text-gray-500 dark:text-gray-400">{lot.customer}</div>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-mono text-gray-900 dark:text-white">
@@ -342,10 +435,17 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings }) => {
                                                 {lot.status}
                                             </span>
                                         </td>
-                                        <td className="px-6 py-4 text-center text-gray-400">
-                                            <svg className={`w-5 h-5 transform transition-transform ${expandedLot === lot.lotNumber ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                                            </svg>
+                                        <td className="px-6 py-4 text-center">
+                                            <div className="flex space-x-2 justify-center">
+                                                <button onClick={() => setEditingLot(lot)} className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300" title="Manage Lot">
+                                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L15.232 5.232z" /></svg>
+                                                </button>
+                                                <button onClick={() => toggleExpand(lot.lotNumber)} className="text-gray-400 hover:text-gray-600" title="View Details">
+                                                    <svg className={`w-5 h-5 transform transition-transform ${expandedLot === lot.lotNumber ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                                                    </svg>
+                                                </button>
+                                            </div>
                                         </td>
                                     </tr>
                                     {expandedLot === lot.lotNumber && (
@@ -371,13 +471,16 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings }) => {
                                                              </div>
                                                          </div>
                                                          
-                                                         {Object.keys(lot.materials).length > 0 && (
+                                                         {Object.keys(lot.materials).length > 0 ? (
                                                              <div>
-                                                                 <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Raw Material Traceability</h4>
+                                                                 <div className="flex items-center mb-2">
+                                                                     <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Raw Material Traceability</h4>
+                                                                     {lot.missingMaterials && <span className="ml-2 text-[10px] text-amber-600 font-bold bg-amber-100 dark:bg-amber-900/30 dark:text-amber-400 px-1.5 rounded">INCOMPLETE</span>}
+                                                                 </div>
                                                                  <div className="bg-white dark:bg-gray-700/30 rounded border border-gray-100 dark:border-gray-600 p-2">
                                                                      <ul className="space-y-1">
-                                                                         {Object.entries(lot.materials).map(([itemId, stockIds]) => {
-                                                                             const itemName = ITEMS_MAP.get(itemId as InventoryItemId)?.name || itemId;
+                                                                         {(Object.entries(lot.materials) as [InventoryItemId, Set<string>][]).map(([itemId, stockIds]) => {
+                                                                             const itemName = ITEMS_MAP.get(itemId)?.name || itemId;
                                                                              return (
                                                                                  <li key={itemId} className="text-xs flex flex-wrap gap-2 items-center">
                                                                                      <span className="font-medium text-gray-700 dark:text-gray-300 min-w-[100px]">{itemName}:</span>
@@ -393,6 +496,15 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings }) => {
                                                                          })}
                                                                      </ul>
                                                                  </div>
+                                                             </div>
+                                                         ) : (
+                                                             <div className="bg-amber-50 dark:bg-amber-900/10 p-2 rounded border border-amber-100 dark:border-amber-900/30">
+                                                                 <p className="text-xs text-amber-700 dark:text-amber-500 flex items-center">
+                                                                     <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                                     </svg>
+                                                                     No raw material linkages recorded.
+                                                                 </p>
                                                              </div>
                                                          )}
                                                      </div>
