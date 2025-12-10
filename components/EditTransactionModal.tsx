@@ -63,7 +63,8 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
         const items: InventoryItemId[] = [];
         Object.values(formula.rawMaterials).forEach(id => {
              const item = ITEMS_MAP.get(id as InventoryItemId);
-             if (item && !settings.bypassedItems[item.id]) {
+             // Updated: Include item even if bypassed (Capacity Exempt)
+             if (item) {
                  items.push(item.id);
              }
         });
@@ -414,7 +415,7 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
                             <tbody className="divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-gray-800">
                                 {availableLots.length > 0 ? (
                                     availableLots.map((lot) => (
-                                        <tr key={lot.lot} className={(allocations[lot.lot] || 0) > 0 ? "bg-blue-50 dark:bg-blue-900/20" : ""}>
+                                        <tr key={lot.lot} className={(allocations[lot.lot] || 0) > 0 ? "bg-blue-50 dark:bg-blue-900/20" : "odd:bg-white even:bg-gray-50 dark:odd:bg-gray-800 dark:even:bg-gray-700/50"}>
                                             <td className="px-3 py-2 text-xs font-mono text-gray-900 dark:text-white whitespace-nowrap">{lot.lot}</td>
                                             <td className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">{new Date(lot.date).toLocaleDateString()}</td>
                                             <td className="px-3 py-2 text-xs text-right font-mono text-gray-700 dark:text-gray-300">{lot.remaining}</td>
@@ -471,7 +472,7 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
                                     const formatVal = (val: number) => item?.unit === 'rolls' ? val.toFixed(2) : val.toLocaleString(undefined, { maximumFractionDigits: 0 });
 
                                     return (
-                                        <tr key={d.itemId} className={`text-xs ${isShortage ? 'bg-red-50 dark:bg-red-900/20' : 'bg-white dark:bg-gray-800'}`}>
+                                        <tr key={d.itemId} className={`text-xs ${isShortage ? 'bg-red-50 dark:bg-red-900/20' : 'odd:bg-white even:bg-gray-50 dark:odd:bg-gray-800 dark:even:bg-gray-700/50'}`}>
                                             <td className="px-3 py-2 font-medium text-gray-900 dark:text-white truncate max-w-[120px]" title={d.itemName}>{d.itemName}</td>
                                             <td className="px-3 py-2 text-right font-mono text-gray-600 dark:text-gray-300">{formatVal(requiredQty)}</td>
                                             <td className="px-3 py-2 text-right font-mono text-gray-600 dark:text-gray-300" title={`Current: ${formatVal(currentStock)} + Original: ${formatVal(originalQty)}`}>{formatVal(effectiveStock)}</td>
@@ -530,10 +531,10 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
                 </form>
             </div>
              <style>{`
-                .input-base { display: block; width: 100%; padding: 0.5rem 0.75rem; font-size: 0.875rem; border: 1px solid #D1D5DB; border-radius: 0.375rem; }
+                .input-base { display: block; width: 100%; padding: 0.5rem 0.75rem; font-size: 0.875rem; border: 1px solid #D1D5DB; border-radius: 0.375rem; color: #111827; }
                 .dark .input-base { background-color: #374151; border-color: #4B5563; color: #FFFFFF; }
                 .input-base:focus { outline: 2px solid transparent; outline-offset: 2px; border-color: #B11E31; }
-                .input-sm-base { display: block; width: 100%; padding: 0.25rem 0.5rem; font-size: 0.875rem; border: 1px solid #D1D5DB; border-radius: 0.375rem; }
+                .input-sm-base { display: block; width: 100%; padding: 0.25rem 0.5rem; font-size: 0.875rem; border: 1px solid #D1D5DB; border-radius: 0.375rem; color: #111827; }
                 .dark .input-sm-base { background-color: #374151; border-color: #4B5563; color: #FFFFFF; }
             `}</style>
         </div>

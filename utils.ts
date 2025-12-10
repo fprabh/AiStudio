@@ -27,7 +27,7 @@ export const calculateDeductions = (productId: ProductId, cartonsShipped: number
     const rawMaterialItems = Object.values(rule.rawMaterials);
     for(const unknownItemId of rawMaterialItems) {
         const itemId = unknownItemId as InventoryItemId;
-        if(settings.bypassedItems[itemId]) continue;
+        // Logic Update: We now deduct even if bypassed/exempt from capacity planning
         
         let quantity = 0;
         const itemInfo = ITEMS_MAP.get(itemId);
@@ -45,7 +45,8 @@ export const calculateDeductions = (productId: ProductId, cartonsShipped: number
     const packagingItems = Object.values(rule.packaging);
      for(const unknownItemId of packagingItems) {
         const itemId = unknownItemId as InventoryItemId;
-        if(settings.bypassedItems[itemId]) continue;
+        // Logic Update: We now deduct even if bypassed/exempt from capacity planning
+
         let quantity = itemId === rule.packaging.box ? cartonsShipped * rule.boxesPerCarton : cartonsShipped;
         
         const rejectionRate = settings.rejectionCoefficients[itemId] || 0;

@@ -1,7 +1,7 @@
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useInventory } from './hooks/useInventory';
-import { View } from './types';
+import { View, NavigationType, InventoryItemId } from './types';
 import Header from './components/Header';
 import Dashboard from './components/Dashboard';
 import InventoryList from './components/InventoryList';
@@ -21,16 +21,61 @@ const App: React.FC = () => {
   const inventoryData = useInventory();
   const [theme, toggleTheme] = useTheme();
 
+  // Navigation Context State
+  const [navLotSearch, setNavLotSearch] = useState('');
+  const [navStockId, setNavStockId] = useState('');
+  const [navItemId, setNavItemId] = useState('');
+  const [navShipmentPO, setNavShipmentPO] = useState('');
+
+  const handleNavigate = useCallback((type: NavigationType, value: string) => {
+      // Reset contexts
+      setNavLotSearch('');
+      setNavStockId('');
+      setNavItemId('');
+      setNavShipmentPO('');
+
+      switch(type) {
+          case 'lot':
+              setNavLotSearch(value);
+              setView('lotHistory');
+              break;
+          case 'stock':
+              setNavStockId(value);
+              setView('stockHistory');
+              break;
+          case 'inventory':
+              setNavItemId(value);
+              setView('inventory');
+              break;
+          case 'shipment':
+              setNavShipmentPO(value);
+              setView('shipments');
+              break;
+      }
+  }, []);
+
   const renderView = () => {
     switch (view) {
       case 'dashboard':
-        return <Dashboard inventory={inventoryData.inventory} productInventory={inventoryData.productInventory} setView={setView} settings={inventoryData.settings} />;
+        return <Dashboard 
+                  inventory={inventoryData.inventory} 
+                  productInventory={inventoryData.productInventory} 
+                  setView={setView} 
+                  settings={inventoryData.settings} 
+                  onNavigate={handleNavigate}
+                />;
       case 'inventory':
-        return <InventoryList inventory={inventoryData.inventory} settings={inventoryData.settings} />;
+        return <InventoryList 
+                  inventory={inventoryData.inventory} 
+                  settings={inventoryData.settings} 
+                  highlightItemId={navItemId as InventoryItemId}
+                  onNavigate={handleNavigate}
+                />;
       case 'transactions':
         return <TransactionLog 
                   transactions={inventoryData.transactions}
                   settings={inventoryData.settings}
+                  onNavigate={handleNavigate}
                 />;
       case 'shipments':
         return <Shipments 
@@ -40,6 +85,8 @@ const App: React.FC = () => {
                   settings={inventoryData.settings}
                   productInventory={inventoryData.productInventory}
                   lotState={inventoryData.lotState}
+                  initialSearchTerm={navShipmentPO}
+                  onNavigate={handleNavigate}
                />;
       case 'productionHistory':
         return <ProductionHistory 
@@ -48,6 +95,7 @@ const App: React.FC = () => {
                   deleteTransaction={inventoryData.deleteTransaction}
                   settings={inventoryData.settings}
                   inventory={inventoryData.inventory}
+                  onNavigate={handleNavigate}
                />;
       case 'stockHistory':
         return <StockHistory 
@@ -56,6 +104,8 @@ const App: React.FC = () => {
                   deleteTransaction={inventoryData.deleteTransaction}
                   settings={inventoryData.settings}
                   inventory={inventoryData.inventory}
+                  initialStockId={navStockId}
+                  onNavigate={handleNavigate}
                />;
       case 'lotHistory':
         return <LotHistory 
@@ -66,6 +116,8 @@ const App: React.FC = () => {
                   updateTransaction={inventoryData.updateTransaction}
                   deleteTransaction={inventoryData.deleteTransaction}
                   inventory={inventoryData.inventory}
+                  initialSearchTerm={navLotSearch}
+                  onNavigate={handleNavigate}
                />;
       case 'addStock':
         return <AddStockForm 
@@ -101,12 +153,12 @@ const App: React.FC = () => {
           importData={inventoryData.importData}
         />;
       default:
-        return <Dashboard inventory={inventoryData.inventory} productInventory={inventoryData.productInventory} setView={setView} settings={inventoryData.settings} />;
+        return <Dashboard inventory={inventoryData.inventory} productInventory={inventoryData.productInventory} setView={setView} settings={inventoryData.settings} onNavigate={handleNavigate} />;
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-brand-dark dark:text-gray-200">
+    <div className="min-h-screen text-brand-dark dark:text-gray-200">
       <Header setView={setView} currentView={view} theme={theme} toggleTheme={toggleTheme} />
       <main className="p-4 sm:p-6 lg:p-8">
         {renderView()}

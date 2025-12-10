@@ -13,6 +13,9 @@ export type Customer = 'PHSA' | 'PADM' | 'Alliance';
 export type View = 'dashboard' | 'inventory' | 'transactions' | 'shipments' | 'productionHistory' | 'stockHistory' | 'addStock' | 'logProduction' | 'logShipment' | 'settings' | 'lotHistory';
 export type LotLevel = 'LV1' | 'LV2' | 'LV3';
 
+export type NavigationType = 'lot' | 'stock' | 'inventory' | 'shipment';
+export type OnNavigate = (type: NavigationType, value: string) => void;
+
 export interface InventoryItem {
   id: InventoryItemId;
   name: string;

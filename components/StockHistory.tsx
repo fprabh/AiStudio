@@ -1,11 +1,11 @@
-
-import React, { useMemo, useState } from 'react';
-import { Transaction, Category, InventoryState, InventoryItemId } from '../types';
+import React, { useMemo, useState, useEffect } from 'react';
+import { Transaction, Category, InventoryState, InventoryItemId, OnNavigate } from '../types';
 import { INVENTORY_ITEMS } from '../constants';
 import { useInventory } from '../hooks/useInventory';
 import EditTransactionModal from './EditTransactionModal';
 import ConfirmationModal from './ConfirmationModal';
 import StockUsageModal from './StockUsageModal';
+import { SmartLink } from './VisualHelpers';
 
 interface StockHistoryProps {
   transactions: Transaction[];
@@ -13,6 +13,8 @@ interface StockHistoryProps {
   deleteTransaction: ReturnType<typeof useInventory>['deleteTransaction'];
   settings: ReturnType<typeof useInventory>['settings'];
   inventory: InventoryState;
+  initialStockId?: string;
+  onNavigate: OnNavigate;
 }
 
 type StockTransaction = Transaction & { 
@@ -30,7 +32,7 @@ type SortDirection = 'asc' | 'desc';
 
 const ITEMS_MAP = new Map(INVENTORY_ITEMS.map(item => [item.id, item]));
 
-const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransaction, deleteTransaction, settings, inventory }) => {
+const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransaction, deleteTransaction, settings, inventory, initialStockId, onNavigate }) => {
   const [viewMode, setViewMode] = useState<'byItem' | 'byDate'>('byItem');
   
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection }>({
@@ -51,6 +53,24 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
 
   // Usage Modal State
   const [usageModalData, setUsageModalData] = useState<{ stockId: string, itemId: InventoryItemId, itemName: string } | null>(null);
+
+  // Effect to auto-open modal if stock ID is provided via navigation
+  useEffect(() => {
+    if (initialStockId) {
+        // Find transaction to get item details
+        const tx = transactions.find(t => t.type === 'IN' && t.details.some(d => d.stockId === initialStockId));
+        if (tx) {
+            const detail = tx.details.find(d => d.stockId === initialStockId);
+            if (detail) {
+                setUsageModalData({
+                    stockId: initialStockId,
+                    itemId: detail.itemId,
+                    itemName: detail.itemName
+                });
+            }
+        }
+    }
+  }, [initialStockId, transactions]);
 
 
   const handleSort = (key: SortKey) => {
@@ -334,7 +354,7 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
       if (status === 'new') {
           return "bg-green-50 dark:bg-green-900/20 border-l-2 border-green-500";
       }
-      return "hover:bg-gray-50 dark:hover:bg-gray-700/50";
+      return "odd:bg-white even:bg-gray-50 dark:odd:bg-gray-800 dark:even:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors";
   };
 
   return (
@@ -355,6 +375,7 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
                 itemName={usageModalData.itemName}
                 transactions={transactions}
                 onClose={() => setUsageModalData(null)}
+                onNavigate={onNavigate}
             />
         )}
         <ConfirmationModal 
@@ -420,7 +441,7 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
       {/* --- BY ITEM VIEW --- */}
       {viewMode === 'byItem' && Object.entries(groupedInventory).map(([category, subCategories]) => (
         <div key={category} className="space-y-8 animate-fade-in">
-             <h2 className="text-2xl font-bold text-gray-800 dark:text-white sticky top-16 bg-gray-50 dark:bg-gray-900 py-2 z-10 border-b border-gray-200 dark:border-gray-700">{category}</h2>
+             <h2 className="text-2xl font-bold text-gray-800 dark:text-white sticky top-16 bg-gray-100 dark:bg-gray-900 py-2 z-10 border-b border-gray-200 dark:border-gray-700">{category}</h2>
              
              {Object.entries(subCategories)
                 .sort(([subA], [subB]) => subA.localeCompare(subB))
@@ -435,7 +456,7 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
                             const transactionsList = stockByCategory[item.name] || [];
                             
                             return (
-                                <div key={item.id} className="bg-white dark:bg-gray-800 shadow-md rounded-lg overflow-hidden">
+                                <div key={item.id} className="bg-white dark:bg-gray-800 shadow-md rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
                                     <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 flex justify-between items-center">
                                         <h3 className="text-xl font-bold text-gray-900 dark:text-white">{item.name}</h3>
                                         {transactionsList.length > 0 && (
@@ -557,7 +578,12 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
                                               {group.orderNumber ? (
                                                   <>
                                                     <span className="text-gray-500 dark:text-gray-400 text-sm font-normal">PO:</span>
-                                                    <span className="font-mono">{group.orderNumber}</span>
+                                                    <SmartLink 
+                                                        type="shipment" 
+                                                        value={group.orderNumber} 
+                                                        label={<span className="font-mono">{group.orderNumber}</span>} 
+                                                        onNavigate={onNavigate} 
+                                                    />
                                                   </>
                                               ) : (
                                                   <span className="text-gray-500 dark:text-gray-400 italic">No Vendor PO</span>
@@ -601,14 +627,20 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
                                               {allDetails.map((detail, idx) => {
                                                   const item = ITEMS_MAP.get(detail.itemId);
                                                   return (
-                                                      <tr key={`detail-${idx}`}>
+                                                      <tr key={`detail-${idx}`} className="odd:bg-white even:bg-gray-50 dark:odd:bg-gray-800 dark:even:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors">
                                                           <td className="px-4 py-2 text-sm font-medium text-gray-900 dark:text-white">
-                                                              {item?.name || detail.itemName}
+                                                              <SmartLink 
+                                                                    type="inventory" 
+                                                                    value={detail.itemId} 
+                                                                    label={item?.name || detail.itemName} 
+                                                                    onNavigate={onNavigate}
+                                                                    className="text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400" 
+                                                              />
                                                               <div className="text-xs text-gray-500 font-normal">{item?.category} - {item?.subCategory}</div>
                                                           </td>
                                                           <td className="px-4 py-2 text-sm text-gray-500 dark:text-gray-300">
                                                               {(detail.stockId || (!detail.stockId && group.orderNumber)) && (
-                                                                  <div className="font-mono text-xs bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded w-fit mb-1">
+                                                                  <div className="font-mono text-xs bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded w-fit mb-1 border border-gray-200 dark:border-gray-600">
                                                                       {detail.stockId ? `ID: ${detail.stockId}` : `ID: ${group.orderNumber}`}
                                                                   </div>
                                                               )}
@@ -628,7 +660,7 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
                       </div>
                   </div>
               )) : (
-                  <div className="text-center py-12 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-lg shadow-md">
+                  <div className="text-center py-12 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700">
                       <p>No incoming stock history found.</p>
                   </div>
               )}

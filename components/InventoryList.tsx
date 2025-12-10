@@ -1,16 +1,21 @@
-import React from 'react';
-import { InventoryState, Category, InventoryItem } from '../types';
+
+import React, { useEffect, useRef } from 'react';
+import { InventoryState, Category, InventoryItem, OnNavigate, InventoryItemId } from '../types';
 import { INVENTORY_ITEMS } from '../constants';
 import { useInventory } from '../hooks/useInventory';
+import { CategoryIcon, SmartLink } from './VisualHelpers';
 
 interface InventoryListProps {
   inventory: InventoryState;
   settings: ReturnType<typeof useInventory>['settings'];
+  highlightItemId?: InventoryItemId;
+  onNavigate: OnNavigate;
 }
 
 const getItemStatus = (item: InventoryItem, inventory: InventoryState, settings: InventoryListProps['settings']) => {
+    // If set to 'exclude from capacity', we show that status prominently
     if (settings.bypassedItems[item.id]) {
-        return { text: 'Bypassed', color: 'bg-gray-200 text-gray-800 dark:bg-gray-600 dark:text-gray-200' };
+        return { text: 'Capacity Exempt', color: 'bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300' };
     }
     const currentStock = inventory[item.id] || 0;
     const thresholds = settings.stockThresholds[item.id];
@@ -25,7 +30,15 @@ const getItemStatus = (item: InventoryItem, inventory: InventoryState, settings:
 };
 
 
-const InventoryList: React.FC<InventoryListProps> = ({ inventory, settings }) => {
+const InventoryList: React.FC<InventoryListProps> = ({ inventory, settings, highlightItemId, onNavigate }) => {
+  const itemRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
+
+  useEffect(() => {
+    if (highlightItemId && itemRefs.current[highlightItemId]) {
+      itemRefs.current[highlightItemId]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [highlightItemId]);
+
   const groupedItems = INVENTORY_ITEMS.reduce((acc, item) => {
     const category = item.category;
     const subCategory = item.subCategory;
@@ -49,7 +62,7 @@ const InventoryList: React.FC<InventoryListProps> = ({ inventory, settings }) =>
           {Object.entries(subCategories).sort(([subA], [subB]) => subA.localeCompare(subB)).map(([subCategory, items]) => (
              <div key={subCategory} className="mb-8">
               <h4 className="text-xl font-medium text-brand-gray dark:text-gray-300 mb-3">{subCategory}</h4>
-              <div className="bg-white dark:bg-gray-800 shadow-md rounded-lg overflow-hidden">
+              <div className="bg-white dark:bg-gray-800 shadow-md rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                     <thead className="bg-gray-50 dark:bg-gray-700">
@@ -65,10 +78,23 @@ const InventoryList: React.FC<InventoryListProps> = ({ inventory, settings }) =>
                         const currentStock = inventory[item.id] || 0;
                         const status = getItemStatus(item, inventory, settings);
                         const formatStock = (stock: number) => item.unit === 'rolls' ? stock.toFixed(2) : stock.toLocaleString();
+                        const isHighlighted = highlightItemId === item.id;
 
                         return (
-                            <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{item.name}</td>
+                            <tr 
+                                key={item.id} 
+                                ref={el => {itemRefs.current[item.id] = el}}
+                                className={`
+                                    transition-colors duration-500
+                                    ${isHighlighted ? 'bg-yellow-100 dark:bg-yellow-900/30 animate-pulse' : 'odd:bg-white even:bg-gray-50 dark:odd:bg-gray-800 dark:even:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-600'}
+                                `}
+                            >
+                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
+                                  <div className="flex items-center space-x-3">
+                                      <CategoryIcon category={item.category} subCategory={item.subCategory} />
+                                      <span>{item.name}</span>
+                                  </div>
+                              </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500 dark:text-gray-300 font-mono">
                                 {formatStock(currentStock)}
                               </td>

@@ -1,10 +1,11 @@
 
 import React, { useMemo, useState } from 'react';
-import { Transaction, Customer, InventoryState, ProductId, InventoryItemId } from '../types';
+import { Transaction, Customer, InventoryState, ProductId, InventoryItemId, OnNavigate } from '../types';
 import { FINISHED_PRODUCTS } from '../constants';
 import { useInventory } from '../hooks/useInventory';
 import ConfirmationModal from './ConfirmationModal';
 import EditTransactionModal from './EditTransactionModal';
+import { ProductBadge, LotNumberDisplay, SmartLink } from './VisualHelpers';
 
 interface ProductionHistoryProps {
   transactions: Transaction[];
@@ -12,6 +13,7 @@ interface ProductionHistoryProps {
   deleteTransaction: ReturnType<typeof useInventory>['deleteTransaction'];
   settings: ReturnType<typeof useInventory>['settings'];
   inventory: InventoryState;
+  onNavigate: OnNavigate;
 }
 
 type ProductionTransaction = Transaction & { 
@@ -21,7 +23,7 @@ type ProductionTransaction = Transaction & {
 type SortKey = 'date' | 'orderNumber' | 'productName' | 'cartonsProduced';
 type SortDirection = 'asc' | 'desc';
 
-const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, updateTransaction, deleteTransaction, settings, inventory }) => {
+const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, updateTransaction, deleteTransaction, settings, inventory, onNavigate }) => {
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection }>({
     key: 'date',
     direction: 'desc',
@@ -56,9 +58,8 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
             if (tx.productId) {
                  const formula = settings.productFormulas[tx.productId as ProductId];
                  if (formula) {
-                     const required = (Object.values(formula.rawMaterials) as InventoryItemId[]).filter(
-                        id => !settings.bypassedItems[id]
-                     );
+                     // Updated: Check missing materials even if excluded from capacity planning
+                     const required = (Object.values(formula.rawMaterials) as InventoryItemId[]);
                      const linked = tx.materialLinkage ? Object.keys(tx.materialLinkage) : [];
                      missingMaterials = required.some(reqId => !linked.includes(reqId));
                  }
@@ -95,6 +96,19 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
 
     return grouped;
   }, [transactions, sortConfig, settings]);
+
+  const sortedCustomerKeys = useMemo(() => {
+      const keys = Object.keys(productionByCustomer);
+      const priority = ['Alliance', 'PHSA', 'PADM'];
+      return keys.sort((a, b) => {
+          const idxA = priority.indexOf(a);
+          const idxB = priority.indexOf(b);
+          if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+          if (idxA !== -1) return -1;
+          if (idxB !== -1) return 1;
+          return a.localeCompare(b);
+      });
+  }, [productionByCustomer]);
 
   const confirmEdit = (updatedTx: Transaction) => {
       updateTransaction(updatedTx);
@@ -175,71 +189,104 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
         </div>
       </div>
       
-      {(Object.entries(productionByCustomer) as [string, ProductionTransaction[]][]).map(([customer, customerProduction]) => {
+      {sortedCustomerKeys.map((customer) => {
+         const customerProduction = productionByCustomer[customer];
          const totalCartons = customerProduction.reduce((sum, t) => sum + (t.cartonsShipped || 0), 0);
          
          if (customerProduction.length === 0) return null;
 
+         // Group transactions by Product Name to create sub-tables
+         const txsByProduct = customerProduction.reduce((acc, tx) => {
+             if (!acc[tx.productName]) acc[tx.productName] = [];
+             acc[tx.productName].push(tx);
+             return acc;
+         }, {} as Record<string, ProductionTransaction[]>);
+
+         const productNames = Object.keys(txsByProduct).sort();
+
          return (
-            <div key={customer} className="bg-white dark:bg-gray-800 shadow-md rounded-lg overflow-hidden mb-8">
+            <div key={customer} className="bg-white dark:bg-gray-800 shadow-md rounded-lg overflow-hidden mb-8 border border-gray-200 dark:border-gray-700">
               <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-700">
                 <h3 className="text-xl font-bold text-gray-900 dark:text-white">{customer}</h3>
                 <span className="inline-flex items-center px-3 py-0.5 rounded-full text-sm font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
                   Total Produced: {totalCartons.toLocaleString()} Cartons
                 </span>
               </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                  <thead className="bg-gray-50 dark:bg-gray-800">
-                    <tr>
-                      <TableHeader label="Date" column="date" />
-                      <TableHeader label="Lot Numbers" column="orderNumber" />
-                      <TableHeader label="Product" column="productName" />
-                      <TableHeader label="Cartons" column="cartonsProduced" align="right" />
-                      {isManageMode && <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>}
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {customerProduction.map(t => (
-                      <tr key={t.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
-                          {new Date(t.date).toLocaleDateString()}
-                        </td>
-                         <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-300 font-mono min-w-[150px] flex items-center">
-                             {t.orderNumber || '-'}
-                             {t.missingMaterials && (
-                                <span className="ml-2 text-amber-500" title="Missing Raw Material Linkage">
-                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                    </svg>
-                                </span>
-                             )}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
-                          {t.productName}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 dark:text-white font-bold font-mono">
-                             {t.cartonsShipped?.toLocaleString()}
-                        </td>
-                        {isManageMode && (
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                <div className="flex justify-end space-x-3 items-center">
-                                    <button onClick={() => setEditingTransaction(t)} className="text-brand-red hover:text-red-900 dark:text-red-400 dark:hover:text-red-300">Edit</button>
-                                    <button onClick={() => setItemToDelete(t.id)} className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200">Delete</button>
-                                </div>
-                            </td>
-                        )}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              
+              <div className="p-4 sm:p-6 space-y-8">
+                  {productNames.map(productName => {
+                      const productTxs = txsByProduct[productName];
+                      const productTotal = productTxs.reduce((sum, t) => sum + (t.cartonsShipped || 0), 0);
+
+                      return (
+                          <div key={productName} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                              <div className="bg-gray-50 dark:bg-gray-700/50 px-4 py-2 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                                  <h4 className="text-md font-semibold text-gray-800 dark:text-white flex items-center gap-2">
+                                     <ProductBadge name={productName} hideCustomer={true} />
+                                  </h4>
+                                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                                      {productTotal.toLocaleString()} Cartons
+                                  </span>
+                              </div>
+                              <div className="overflow-x-auto">
+                                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                  <thead className="bg-white dark:bg-gray-800">
+                                    <tr>
+                                      <TableHeader label="Date" column="date" />
+                                      <TableHeader label="Lot Number" column="orderNumber" />
+                                      <TableHeader label="Cartons" column="cartonsProduced" align="right" />
+                                      {isManageMode && <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>}
+                                    </tr>
+                                  </thead>
+                                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                    {productTxs.map(t => (
+                                      <tr key={t.id} className="odd:bg-white even:bg-gray-50 dark:odd:bg-gray-800 dark:even:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors">
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
+                                          {new Date(t.date).toLocaleDateString()}
+                                        </td>
+                                         <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-300 font-mono min-w-[150px] flex items-center">
+                                            {t.orderNumber ? (
+                                                <SmartLink 
+                                                    type="lot" 
+                                                    value={t.orderNumber} 
+                                                    label={<LotNumberDisplay value={t.orderNumber} />} 
+                                                    onNavigate={onNavigate} 
+                                                />
+                                            ) : '-'}
+                                             {t.missingMaterials && (
+                                                <span className="ml-2 text-amber-500" title="Missing Raw Material Linkage">
+                                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                                    </svg>
+                                                </span>
+                                             )}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 dark:text-white font-bold font-mono">
+                                             {t.cartonsShipped?.toLocaleString()}
+                                        </td>
+                                        {isManageMode && (
+                                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                                <div className="flex justify-end space-x-3 items-center">
+                                                    <button onClick={() => setEditingTransaction(t)} className="text-brand-red hover:text-red-900 dark:text-red-400 dark:hover:text-red-300">Edit</button>
+                                                    <button onClick={() => setItemToDelete(t.id)} className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200">Delete</button>
+                                                </div>
+                                            </td>
+                                        )}
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                          </div>
+                      );
+                  })}
               </div>
             </div>
          );
       })}
       
       {Object.values(productionByCustomer).every((arr) => (arr as ProductionTransaction[]).length === 0) && (
-          <div className="text-center py-12 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-lg shadow-md">
+          <div className="text-center py-12 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700">
               <p>No production records found.</p>
           </div>
       )}

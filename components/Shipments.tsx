@@ -1,9 +1,11 @@
-import React, { useMemo, useState } from 'react';
-import { Transaction, Customer, ProductState, LotState } from '../types';
+
+import React, { useMemo, useState, useEffect } from 'react';
+import { Transaction, Customer, ProductState, LotState, OnNavigate } from '../types';
 import { FINISHED_PRODUCTS } from '../constants';
 import { useInventory } from '../hooks/useInventory';
 import EditTransactionModal from './EditTransactionModal';
 import ConfirmationModal from './ConfirmationModal';
+import { ProductBadge, LotNumberDisplay, SmartLink } from './VisualHelpers';
 
 interface ShipmentsProps {
   transactions: Transaction[];
@@ -12,6 +14,8 @@ interface ShipmentsProps {
   settings: ReturnType<typeof useInventory>['settings'];
   productInventory: ProductState;
   lotState: LotState;
+  initialSearchTerm?: string;
+  onNavigate: OnNavigate;
 }
 
 type ShipmentTransaction = Transaction & { 
@@ -19,7 +23,13 @@ type ShipmentTransaction = Transaction & {
     displayStatus?: 'normal' | 'deleted' | 'modified-original' | 'new';
 };
 
-const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, deleteTransaction, settings, productInventory, lotState }) => {
+const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, deleteTransaction, settings, productInventory, lotState, initialSearchTerm = '', onNavigate }) => {
+  const [searchQuery, setSearchQuery] = useState(initialSearchTerm);
+  
+  useEffect(() => {
+    if (initialSearchTerm) setSearchQuery(initialSearchTerm);
+  }, [initialSearchTerm]);
+
   // Edit Mode State
   const [isEditMode, setIsEditMode] = useState(false);
   const [pendingDeletes, setPendingDeletes] = useState<Set<string>>(new Set());
@@ -80,6 +90,15 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
     transactions.filter(t => t.type === 'SHIPMENT' && t.productId).forEach(originalTx => {
         const updatedTx = pendingUpdates.get(originalTx.id);
         const isDeleted = pendingDeletes.has(originalTx.id);
+        
+        // Filter Logic
+        if (searchQuery) {
+            const lower = searchQuery.toLowerCase();
+            const matches = 
+                (originalTx.orderNumber || '').toLowerCase().includes(lower) ||
+                (originalTx.description || '').toLowerCase().includes(lower);
+            if (!matches) return;
+        }
 
         const originalProduct = FINISHED_PRODUCTS.find(p => p.id === originalTx.productId);
         if (originalProduct) {
@@ -120,7 +139,7 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
     });
 
     return grouped;
-  }, [transactions, pendingDeletes, pendingUpdates]);
+  }, [transactions, pendingDeletes, pendingUpdates, searchQuery]);
 
   const shipmentSummary = useMemo<Record<string, { total: number; products: Record<string, number> }>>(() => {
     const summary: Record<string, { total: number; products: Record<string, number> }> = {};
@@ -187,7 +206,7 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
   const getRowStyle = (status?: ShipmentTransaction['displayStatus']) => {
       if (status === 'deleted' || status === 'modified-original') return "bg-gray-50 dark:bg-gray-800 opacity-60 text-gray-400 line-through hover:bg-gray-100";
       if (status === 'new') return "bg-green-50 dark:bg-green-900/20 border-l-2 border-green-500";
-      return "hover:bg-gray-50 dark:hover:bg-gray-700/50";
+      return "odd:bg-white even:bg-gray-50 dark:odd:bg-gray-800 dark:even:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors";
   };
 
   return (
@@ -221,7 +240,27 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
 
       <div className="flex justify-between items-center">
         <h2 className="text-3xl font-bold text-gray-900 dark:text-white">Shipment History</h2>
-        <div className="space-x-4">
+        <div className="flex items-center space-x-4">
+             <div className="relative">
+                <input
+                    type="text"
+                    placeholder="Search PO Number..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-3 pr-8 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-brand-red focus:border-brand-red dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                />
+                 {searchQuery && (
+                    <button 
+                        onClick={() => setSearchQuery('')}
+                        className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                )}
+             </div>
+
             {!isEditMode ? (
                 <button onClick={() => setIsEditMode(true)} className="px-4 py-2 bg-white border border-gray-300 dark:bg-gray-700 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-md shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 font-medium text-sm">Edit Table</button>
             ) : (
@@ -233,7 +272,8 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
         </div>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md mb-8 border-l-4 border-brand-red">
+      {!searchQuery && (
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md mb-8 border-l-4 border-brand-red border border-gray-200 dark:border-gray-700">
           <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Total Shipments Overview</h3>
           {Object.keys(shipmentSummary).length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -246,7 +286,7 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
                         <ul className="space-y-2">
                             {Object.entries(stats.products).map(([product, qty]) => (
                                 <li key={product} className="flex justify-between items-center text-sm">
-                                    <span className="text-gray-600 dark:text-gray-300 font-medium">{product}</span>
+                                    <ProductBadge name={product} hideCustomer={true} />
                                     <span className="font-mono font-bold text-gray-900 dark:text-white">{(qty as number).toLocaleString()}</span>
                                 </li>
                             ))}
@@ -258,21 +298,13 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
             <p className="text-sm text-gray-500 dark:text-gray-400 italic">No shipment data available.</p>
           )}
       </div>
+      )}
       
       {(Object.entries(shipmentsByCustomer) as [string, ShipmentTransaction[]][]).map(([customer, shipments]) => {
          const activeShipments = shipments.filter(s => s.displayStatus !== 'deleted' && s.displayStatus !== 'modified-original');
          const totalCartons = activeShipments.reduce((sum, t) => sum + (t.cartonsShipped || 0), 0);
          
-         const productStats = FINISHED_PRODUCTS.filter(p => p.customer === customer).map(product => {
-                const pid = product.id;
-                const currentDbStock = productInventory[pid] || 0;
-                const dbShipped = dbStats[pid] || 0;
-                const totalProduced = currentDbStock + dbShipped;
-                const activeShipped = activeShipments.filter(s => s.productId === pid).reduce((sum, s) => sum + (s.cartonsShipped || 0), 0);
-                return { id: pid, name: product.name, shipped: activeShipped, available: totalProduced - activeShipped };
-            });
-
-         if (shipments.length === 0 && productStats.length === 0) return null;
+         if (shipments.length === 0) return null;
 
          // Group for rendering table
          const rowGroups: { date: string, orderNumber: string, rows: ShipmentTransaction[], totalQty: number }[] = [];
@@ -293,29 +325,12 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
          });
 
          return (
-            <div key={customer} className="bg-white dark:bg-gray-800 shadow-md rounded-lg overflow-hidden mb-8">
+            <div key={customer} className="bg-white dark:bg-gray-800 shadow-md rounded-lg overflow-hidden mb-8 border border-gray-200 dark:border-gray-700">
               <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-700">
                 <h3 className="text-xl font-bold text-gray-900 dark:text-white">{customer}</h3>
                 <span className="inline-flex items-center px-3 py-0.5 rounded-full text-sm font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">Total: {totalCartons.toLocaleString()}</span>
               </div>
               
-              <div className="bg-gray-50 dark:bg-gray-700/30 p-4 border-b border-gray-200 dark:border-gray-700">
-                    <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Product Summary (Current Stock)</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {productStats.map(stat => (
-                            <div key={stat.id} className="bg-white dark:bg-gray-800 p-3 rounded-md shadow-sm border border-gray-200 dark:border-gray-600">
-                                <div className="font-medium text-sm text-gray-900 dark:text-white mb-2 truncate" title={stat.name}>{stat.name}</div>
-                                <div className="grid grid-cols-2 gap-y-1 text-xs">
-                                    <span className="text-gray-500 dark:text-gray-400">Total Sent:</span>
-                                    <span className="text-right font-mono font-bold text-blue-600 dark:text-blue-400">{stat.shipped.toLocaleString()}</span>
-                                    <span className="text-gray-500 dark:text-gray-400">Available:</span>
-                                    <span className={`text-right font-mono font-bold ${stat.available < 0 ? 'text-red-600' : 'text-green-600 dark:text-green-400'}`}>{stat.available.toLocaleString()}</span>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-              </div>
-
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 border-collapse">
                   <thead className="bg-gray-50 dark:bg-gray-800">
@@ -355,22 +370,30 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
                                     )}
                                     {/* Non-Merged Columns */}
                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white align-top">
-                                        {t.productName}
+                                        <ProductBadge name={t.productName} hideCustomer={true} />
                                     </td>
                                     <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-300 align-top">
                                         {t.lotAllocations && Object.keys(t.lotAllocations).length > 0 ? (
-                                            <div className="flex flex-wrap gap-1">
+                                            <div className="flex flex-wrap gap-2">
                                                 {Object.entries(t.lotAllocations).map(([lot, qty]) => (
-                                                    <span key={lot} className="text-xs bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded border border-gray-200 dark:border-gray-600 whitespace-nowrap">
-                                                        <span className="font-mono font-bold">{lot}</span>: {qty}
-                                                    </span>
+                                                    <div key={lot} className="flex items-center text-xs bg-gray-50 dark:bg-gray-700/50 rounded border border-gray-200 dark:border-gray-600 pr-2 overflow-hidden">
+                                                        <span className="bg-gray-100 dark:bg-gray-600 px-1.5 py-1 mr-1 border-r border-gray-200 dark:border-gray-500">
+                                                            <SmartLink 
+                                                                type="lot" 
+                                                                value={lot} 
+                                                                label={<LotNumberDisplay value={lot} className="text-[10px]" />} 
+                                                                onNavigate={onNavigate} 
+                                                            />
+                                                        </span>
+                                                        <span className="font-bold">{qty}</span>
+                                                    </div>
                                                 ))}
                                             </div>
                                         ) : (
                                             <span className="text-red-500 text-xs italic">Missing Lot Info</span>
                                         )}
                                         {!isAllocatedFully && t.lotAllocations && (
-                                            <div className="text-red-500 text-[10px] mt-1">Partial Alloc</div>
+                                            <div className="text-red-500 text-[10px] mt-1 font-semibold">Partial Alloc</div>
                                         )}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 dark:text-white font-bold font-mono align-top">

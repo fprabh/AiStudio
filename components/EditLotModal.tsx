@@ -40,7 +40,8 @@ const EditLotModal: React.FC<EditLotModalProps> = ({ lot, allTransactions, setti
             const formula = settings.productFormulas[pid as ProductId];
             if (!formula) return;
             
-            const requiredItems = (Object.values(formula.rawMaterials) as InventoryItemId[]).filter(id => !settings.bypassedItems[id]);
+            // Updated: Include bypassed items (Capacity Exempt)
+            const requiredItems = (Object.values(formula.rawMaterials) as InventoryItemId[]);
             
             requiredItems.forEach(itemId => {
                 // If we already calculated this item from another product, skip
@@ -268,7 +269,6 @@ const EditLotModal: React.FC<EditLotModalProps> = ({ lot, allTransactions, setti
                                             <h5 className="text-xs font-bold text-gray-600 dark:text-gray-300 uppercase mb-2">Raw Material Links</h5>
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                 {(Object.values(txFormula.rawMaterials) as InventoryItemId[])
-                                                .filter(id => !settings.bypassedItems[id])
                                                 .map(itemId => {
                                                     const item = ITEMS_MAP.get(itemId);
                                                     const stockIds = availableStockIds[itemId] || [];

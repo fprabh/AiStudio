@@ -58,7 +58,8 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
       const items: InventoryItemId[] = [];
       Object.values(formula.rawMaterials).forEach(id => {
            const item = ITEMS_MAP.get(id as InventoryItemId);
-           if (item && !settings.bypassedItems[item.id]) {
+           // Updated: Include item even if bypassed (Capacity Exempt)
+           if (item) {
                items.push(item.id);
            }
       });
@@ -249,7 +250,7 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
     if (!deductionPreview) return [];
     return Object.entries(deductionPreview)
       .filter(([itemId, quantity]) => 
-          !settings.bypassedItems[itemId as InventoryItemId] && 
+          // Updated: Check stock even if bypassed/exempt
           (inventory[itemId as InventoryItemId] || 0) < (quantity as number)
       )
       .map(([itemId]) => ITEMS_MAP.get(itemId as InventoryItemId)?.name);
@@ -445,10 +446,10 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
                         </tr>
                     </thead>
                     <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                        {Object.entries(deductionPreview).map(([itemId, qty]) => {
+                        {Object.entries(deductionPreview).map(([itemId, qty], index) => {
                             const item = ITEMS_MAP.get(itemId as InventoryItemId);
                             const isBypassed = settings.bypassedItems[itemId as InventoryItemId];
-                            if(isBypassed || !item) return null;
+                            if(!item) return null;
                             
                             const requiredQty = qty as number;
                             const currentStock = inventory[itemId as keyof InventoryState] || 0;
@@ -458,9 +459,10 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
                             const formatVal = (val: number) => item.unit === 'rolls' ? val.toFixed(2) : val.toLocaleString(undefined, { maximumFractionDigits: 1 });
 
                             return (
-                                <tr key={itemId} className={isShortage ? 'bg-red-50 dark:bg-red-900/20' : ''}>
+                                <tr key={itemId} className={`odd:bg-white even:bg-gray-50 dark:odd:bg-gray-800 dark:even:bg-gray-700/50 ${isShortage ? 'bg-red-50 dark:bg-red-900/20' : ''}`}>
                                     <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">
                                         {item.name}
+                                        {isBypassed && <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300">Exempt</span>}
                                         <span className="block text-xs text-gray-500 font-normal">{item.unit}</span>
                                     </td>
                                     <td className="px-4 py-3 text-sm text-right text-gray-500 dark:text-gray-300 font-mono">

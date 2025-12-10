@@ -1,16 +1,18 @@
 
 import React, { useState, useMemo } from 'react';
-import { Transaction } from '../types';
+import { Transaction, OnNavigate } from '../types';
 import { useInventory } from '../hooks/useInventory';
 import { calculateDeductions } from '../utils';
+import { SmartLink, LotNumberDisplay } from './VisualHelpers';
 
 interface TransactionLogProps {
   transactions: Transaction[];
   settings: ReturnType<typeof useInventory>['settings'];
+  onNavigate: OnNavigate;
 }
 
-const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, settings }) => {
-  const [sortBy, setSortBy] = useState<'recordDate' | 'transactionDate'>('recordDate');
+const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, settings, onNavigate }) => {
+  const [sortBy, setSortBy] = useState<'recordDate' | 'transactionDate'>('transactionDate');
   const [searchQuery, setSearchQuery] = useState('');
 
   const sortedTransactions = useMemo(() => {
@@ -78,6 +80,34 @@ const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, settings 
       }
   }
 
+  const renderRef = (transaction: Transaction) => {
+      if (!transaction.orderNumber) return null;
+
+      let type: 'lot' | 'shipment' | null = null;
+      let label: React.ReactNode = transaction.orderNumber;
+
+      if (transaction.type === 'PRODUCTION' || transaction.type === 'OUT') {
+          type = 'lot';
+          label = <LotNumberDisplay value={transaction.orderNumber} className="text-sm" />;
+      } else if (transaction.type === 'SHIPMENT') {
+          type = 'shipment';
+      }
+
+      if (type) {
+          return (
+             <SmartLink 
+                type={type} 
+                value={transaction.orderNumber} 
+                label={label}
+                onNavigate={onNavigate} 
+                className="font-mono bg-white dark:bg-gray-700 px-1 py-0.5 rounded border border-gray-200 dark:border-gray-600"
+             />
+          );
+      }
+      // For 'IN', usually a PO, handled as simple text unless we want to link POs in future
+      return <span className="font-mono bg-white dark:bg-gray-700 px-1 py-0.5 rounded border border-gray-200 dark:border-gray-600">{transaction.orderNumber}</span>;
+  };
+
   return (
     <>
       <div className="space-y-6">
@@ -98,7 +128,7 @@ const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, settings 
                       placeholder="Search..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="block w-full pl-10 pr-3 py-1.5 border-gray-300 focus:outline-none focus:ring-brand-red focus:border-brand-red sm:text-sm rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                      className="block w-full pl-10 pr-3 py-1.5 border-gray-300 focus:outline-none focus:ring-brand-red focus:border-brand-red sm:text-sm rounded-md bg-white text-gray-900 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                     />
                  </div>
               </div>
@@ -108,7 +138,7 @@ const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, settings 
                       id="sort"
                       value={sortBy}
                       onChange={(e) => setSortBy(e.target.value as 'recordDate' | 'transactionDate')}
-                      className="pl-3 pr-8 py-1.5 text-base border-gray-300 focus:outline-none focus:ring-brand-red focus:border-brand-red sm:text-sm rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                      className="pl-3 pr-8 py-1.5 text-base border-gray-300 focus:outline-none focus:ring-brand-red focus:border-brand-red sm:text-sm rounded-md bg-white text-gray-900 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                   >
                       <option value="recordDate">Record Date</option>
                       <option value="transactionDate">Transaction Date</option>
@@ -127,7 +157,7 @@ const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, settings 
                     : transaction.details;
 
                   return (
-                  <li key={transaction.id}>
+                  <li key={transaction.id} className="group">
                     <div className="relative pb-8">
                       {transactionIdx !== sortedTransactions.length - 1 ? (
                         <span className="absolute top-4 left-4 -ml-px h-full w-0.5 bg-gray-200 dark:bg-gray-700" aria-hidden="true" />
@@ -138,7 +168,7 @@ const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, settings 
                             {getIcon(transaction.type)}
                           </span>
                         </div>
-                        <div className="min-w-0 flex-1 bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4">
+                        <div className={`min-w-0 flex-1 rounded-lg shadow-sm p-4 border border-gray-200 dark:border-gray-700 ${transactionIdx % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-700/30'}`}>
                           <div className="flex justify-between items-start">
                               <div>
                                 <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -152,14 +182,21 @@ const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, settings 
                           </div>
                           
                           {transaction.orderNumber && (
-                              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                  Ref: <span className="font-mono bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded">{transaction.orderNumber}</span>
+                              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 flex items-center">
+                                  Ref: <span className="ml-1">{renderRef(transaction)}</span>
                               </p>
                           )}
                           <ul className="mt-2 space-y-1 text-sm text-gray-600 dark:text-gray-300">
-                            {detailsToDisplay.map(detail => (
-                              <li key={detail.itemId} className="flex justify-between">
-                                <span>{detail.itemName}</span>
+                            {detailsToDisplay.map((detail, dIdx) => (
+                              <li key={`${detail.itemId}-${dIdx}`} className="flex justify-between">
+                                <span className="flex items-center">
+                                    <SmartLink type="inventory" value={detail.itemId} label={detail.itemName} onNavigate={onNavigate} />
+                                    {detail.stockId && (
+                                        <span className="ml-2 text-xs bg-gray-100 dark:bg-gray-700 px-1 rounded text-gray-500 dark:text-gray-400 font-mono">
+                                            <SmartLink type="stock" value={detail.stockId} label={`ID: ${detail.stockId}`} onNavigate={onNavigate} className="text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400 no-underline hover:underline" />
+                                        </span>
+                                    )}
+                                </span>
                                 <span className={`font-mono ${detail.quantity > 0 ? 'text-green-600' : 'text-red-600'}`}>
                                   {detail.quantity > 0 ? '+' : ''}
                                   {detail.quantity % 1 !== 0 ? detail.quantity.toFixed(4) : detail.quantity.toLocaleString()}

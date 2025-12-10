@@ -1,14 +1,16 @@
 
 import React from 'react';
-import { InventoryState, View, InventoryItemId, ProductId, ProductState, AppSettings } from '../types';
+import { InventoryState, View, InventoryItemId, ProductId, ProductState, AppSettings, OnNavigate } from '../types';
 import { INVENTORY_ITEMS, FINISHED_PRODUCTS } from '../constants';
 import { useInventory } from '../hooks/useInventory';
+import { ProductBadge, SmartLink } from './VisualHelpers';
 
 type DashboardProps = {
   inventory: InventoryState;
   productInventory?: ProductState; // Optional for backward compat
   setView: (view: View) => void;
   settings: ReturnType<typeof useInventory>['settings'];
+  onNavigate: OnNavigate;
 };
 
 const ITEMS_MAP = new Map(INVENTORY_ITEMS.map(item => [item.id, item]));
@@ -65,12 +67,10 @@ const calculateMaxPallets = (product: typeof FINISHED_PRODUCTS[0], inventory: In
     return Math.max(0, Math.min(...possiblePalletsPerItem));
 };
 
-const Dashboard: React.FC<DashboardProps> = ({ inventory, productInventory, setView, settings }) => {
+const Dashboard: React.FC<DashboardProps> = ({ inventory, productInventory, setView, settings, onNavigate }) => {
+    // Logic Update: Removed check for settings.bypassedItems so alerts show for exempt items
     const lowStockItems = INVENTORY_ITEMS
         .filter(item => {
-            if (settings.bypassedItems[item.id]) {
-                return false;
-            }
             const currentStock = inventory[item.id] || 0;
             const lowThreshold = settings.stockThresholds[item.id]?.low;
             return currentStock < lowThreshold;
@@ -78,9 +78,6 @@ const Dashboard: React.FC<DashboardProps> = ({ inventory, productInventory, setV
         
     const sufficientStockItems = INVENTORY_ITEMS
         .filter(item => {
-            if (settings.bypassedItems[item.id]) {
-                return false;
-            }
             const currentStock = inventory[item.id] || 0;
             const thresholds = settings.stockThresholds[item.id];
             return currentStock >= thresholds.low && currentStock < thresholds.ideal;
@@ -100,10 +97,20 @@ const Dashboard: React.FC<DashboardProps> = ({ inventory, productInventory, setV
                         {lowStockItems.map(item => {
                             const currentStock = inventory[item.id] || 0;
                             const formatStock = (stock: number) => item.unit === 'rolls' ? stock.toFixed(2) : stock.toLocaleString();
+                            const isExempt = settings.bypassedItems[item.id];
                             return (
                                 <li key={item.id} className="py-3 flex justify-between items-center">
                                     <div>
-                                        <p className="text-sm font-medium text-red-600 dark:text-red-400">{item.name}</p>
+                                        <p className="text-sm font-medium text-red-600 dark:text-red-400">
+                                            <SmartLink 
+                                                type="inventory" 
+                                                value={item.id} 
+                                                label={item.name} 
+                                                onNavigate={onNavigate} 
+                                                className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
+                                            />
+                                            {isExempt && <span className="ml-2 text-[10px] bg-purple-100 text-purple-800 px-1 rounded dark:bg-purple-900 dark:text-purple-300">Exempt</span>}
+                                        </p>
                                         <p className="text-xs text-gray-400 dark:text-gray-500">
                                             Low Threshold: {settings.stockThresholds[item.id]?.low} {item.unit}
                                         </p>
@@ -131,7 +138,15 @@ const Dashboard: React.FC<DashboardProps> = ({ inventory, productInventory, setV
                             return (
                                 <li key={item.id} className="py-3 flex justify-between items-center">
                                     <div>
-                                        <p className="text-sm font-medium text-yellow-800 dark:text-yellow-300">{item.name}</p>
+                                        <p className="text-sm font-medium text-yellow-800 dark:text-yellow-300">
+                                            <SmartLink 
+                                                type="inventory" 
+                                                value={item.id} 
+                                                label={item.name} 
+                                                onNavigate={onNavigate} 
+                                                className="text-yellow-800 hover:text-yellow-900 dark:text-yellow-300 dark:hover:text-yellow-200"
+                                            />
+                                        </p>
                                         <p className="text-xs text-gray-400 dark:text-gray-500">
                                             Ideal Threshold: {settings.stockThresholds[item.id]?.ideal} {item.unit}
                                         </p>
@@ -168,7 +183,9 @@ const Dashboard: React.FC<DashboardProps> = ({ inventory, productInventory, setV
                             const currentStock = productInventory[product.id] || 0;
                             return (
                             <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{product.name}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
+                                    <ProductBadge name={product.name} />
+                                </td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{product.customer}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 dark:text-white font-bold font-mono">{currentStock.toLocaleString()}</td>
                             </tr>
@@ -198,7 +215,9 @@ const Dashboard: React.FC<DashboardProps> = ({ inventory, productInventory, setV
                             const maxPallets = calculateMaxPallets(product, inventory, settings);
                             return (
                             <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{product.name}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
+                                    <ProductBadge name={product.name} />
+                                </td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{product.customer}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500 dark:text-gray-300 font-semibold">{maxPallets.toLocaleString()}</td>
                             </tr>

@@ -1,7 +1,8 @@
 
 import React, { useMemo } from 'react';
-import { Transaction, InventoryItemId } from '../types';
+import { Transaction, InventoryItemId, OnNavigate } from '../types';
 import { FINISHED_PRODUCTS } from '../constants';
+import { SmartLink, LotNumberDisplay } from './VisualHelpers';
 
 interface StockUsageModalProps {
     stockId: string;
@@ -9,9 +10,10 @@ interface StockUsageModalProps {
     itemName: string;
     transactions: Transaction[];
     onClose: () => void;
+    onNavigate: OnNavigate;
 }
 
-const StockUsageModal: React.FC<StockUsageModalProps> = ({ stockId, itemId, itemName, transactions, onClose }) => {
+const StockUsageModal: React.FC<StockUsageModalProps> = ({ stockId, itemId, itemName, transactions, onClose, onNavigate }) => {
     const { productionUsage, shipmentUsage } = useMemo(() => {
         const prod: any[] = [];
         const relatedLots = new Set<string>();
@@ -105,20 +107,25 @@ const StockUsageModal: React.FC<StockUsageModalProps> = ({ stockId, itemId, item
                                     </thead>
                                     <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                                         {productionUsage.map((item, idx) => (
-                                            <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                                            <tr key={idx} className="odd:bg-white even:bg-gray-50 dark:odd:bg-gray-800 dark:even:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors">
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{new Date(item.date).toLocaleDateString()}</td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{item.productName}</td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900 dark:text-white">{item.lotNumber}</td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500 dark:text-gray-300">{item.quantity} cartons</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900 dark:text-white">
+                                                    <SmartLink 
+                                                        type="lot" 
+                                                        value={item.lotNumber} 
+                                                        label={<LotNumberDisplay value={item.lotNumber} />} 
+                                                        onNavigate={onNavigate} 
+                                                    />
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500 dark:text-gray-300">{item.quantity}</td>
                                             </tr>
                                         ))}
                                     </tbody>
                                 </table>
                             </div>
                         ) : (
-                            <div className="text-sm text-gray-500 dark:text-gray-400 italic bg-gray-50 dark:bg-gray-700/30 p-4 rounded-md">
-                                No production records found linked to this Stock ID.
-                            </div>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 italic">This stock has not been recorded in any production lots yet.</p>
                         )}
                     </div>
 
@@ -126,8 +133,10 @@ const StockUsageModal: React.FC<StockUsageModalProps> = ({ stockId, itemId, item
                     <div>
                          <h4 className="text-lg font-semibold text-gray-800 dark:text-white mb-3 flex items-center">
                             <span className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 text-xs font-bold px-2 py-0.5 rounded mr-2">STEP 2</span>
-                            Shipped Out (via Lot)
+                            Shipped to Customers
                         </h4>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Derived from lots produced using this material.</p>
+                        
                         {shipmentUsage.length > 0 ? (
                             <div className="shadow overflow-hidden border-b border-gray-200 dark:border-gray-700 sm:rounded-lg">
                                 <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
@@ -135,34 +144,48 @@ const StockUsageModal: React.FC<StockUsageModalProps> = ({ stockId, itemId, item
                                         <tr>
                                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Date</th>
                                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Customer</th>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Order Ref</th>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Lot Used</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Product</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Order Ref / Lot</th>
                                             <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Shipped Qty</th>
                                         </tr>
                                     </thead>
                                     <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                                         {shipmentUsage.map((item, idx) => (
-                                            <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                                            <tr key={idx} className="odd:bg-white even:bg-gray-50 dark:odd:bg-gray-800 dark:even:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors">
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{new Date(item.date).toLocaleDateString()}</td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{item.customer}</td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-500 dark:text-gray-300">{item.orderNumber || '-'}</td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900 dark:text-white">{item.lotNumber}</td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500 dark:text-gray-300">{item.quantity} cartons</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{item.productName}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                                    <div className="font-medium text-gray-900 dark:text-white mb-0.5">
+                                                        {item.orderNumber ? (
+                                                            <SmartLink 
+                                                                type="shipment" 
+                                                                value={item.orderNumber} 
+                                                                label={item.orderNumber} 
+                                                                onNavigate={onNavigate} 
+                                                            />
+                                                        ) : (
+                                                            <span className="text-gray-400 italic text-xs">No PO</span>
+                                                        )}
+                                                    </div>
+                                                    <div className="text-xs text-gray-500 dark:text-gray-400 font-mono">
+                                                        Lot: <LotNumberDisplay value={item.lotNumber} />
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500 dark:text-gray-300">{item.quantity}</td>
                                             </tr>
                                         ))}
                                     </tbody>
                                 </table>
                             </div>
-                         ) : (
-                            <div className="text-sm text-gray-500 dark:text-gray-400 italic bg-gray-50 dark:bg-gray-700/30 p-4 rounded-md">
-                                No shipments recorded for the lots produced with this material yet.
-                            </div>
+                        ) : (
+                            <p className="text-sm text-gray-500 dark:text-gray-400 italic">No shipments found associated with lots using this stock.</p>
                         )}
                     </div>
                 </div>
 
-                <div className="p-6 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/30 flex justify-end">
-                    <button onClick={onClose} className="px-4 py-2 bg-white border border-gray-300 dark:bg-gray-600 dark:border-gray-500 text-gray-700 dark:text-gray-200 rounded-md shadow-sm hover:bg-gray-50 dark:hover:bg-gray-500 font-medium text-sm">
+                <div className="p-4 bg-gray-50 dark:bg-gray-700/30 border-t border-gray-200 dark:border-gray-700 flex justify-end">
+                    <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 dark:bg-gray-600 dark:text-gray-200 dark:border-gray-500 dark:hover:bg-gray-500">
                         Close
                     </button>
                 </div>

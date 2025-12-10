@@ -210,7 +210,7 @@ const LogShipmentForm: React.FC<LogShipmentFormProps> = ({ logBatchShipments, se
       {shipmentItems.length > 0 && (
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 mb-6">
               <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Items in this Shipment</h3>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto border border-gray-200 dark:border-gray-700 rounded-lg">
                   <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                       <thead className="bg-gray-50 dark:bg-gray-700">
                           <tr>
@@ -222,7 +222,7 @@ const LogShipmentForm: React.FC<LogShipmentFormProps> = ({ logBatchShipments, se
                       </thead>
                       <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                           {shipmentItems.map(item => (
-                              <tr key={item.id}>
+                              <tr key={item.id} className="odd:bg-white even:bg-gray-50 dark:odd:bg-gray-800 dark:even:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors">
                                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.productName}</td>
                                   <td className="px-4 py-3 text-sm text-right font-mono font-bold text-gray-900 dark:text-white">{item.cartons}</td>
                                   <td className="px-4 py-3 text-xs text-gray-500 dark:text-gray-300">

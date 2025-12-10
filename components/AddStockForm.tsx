@@ -258,12 +258,12 @@ const AddStockForm: React.FC<AddStockFormProps> = ({ addStock, setView, inventor
         </form>
         <style>{`
             .input-base {
-                display: block; width: 100%; padding: 0.5rem 0.75rem; font-size: 0.875rem; line-height: 1.25rem; border: 1px solid #D1D5DB; border-radius: 0.375rem;
+                display: block; width: 100%; padding: 0.5rem 0.75rem; font-size: 0.875rem; line-height: 1.25rem; border: 1px solid #D1D5DB; border-radius: 0.375rem; color: #111827;
             }
             .dark .input-base { background-color: #374151; border-color: #4B5563; color: #FFFFFF; }
             .input-base:focus { outline: 2px solid transparent; outline-offset: 2px; border-color: #B11E31; }
              .input-sm-base {
-                display: block; width: 100%; padding: 0.25rem 0.5rem; font-size: 0.875rem; line-height: 1.25rem; border-width: 1px; border-color: #D1D5DB; border-radius: 0.375rem;
+                display: block; width: 100%; padding: 0.25rem 0.5rem; font-size: 0.875rem; line-height: 1.25rem; border-width: 1px; border-color: #D1D5DB; border-radius: 0.375rem; color: #111827;
             }
             .dark .input-sm-base { background-color: #374151; border-color: #4B5563; color: #FFFFFF; }
         `}</style>

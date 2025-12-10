@@ -1,9 +1,10 @@
 
-import React, { useMemo, useState } from 'react';
-import { Transaction, ProductId, AppSettings, Customer, InventoryItemId, InventoryState, LotMetadata } from '../types';
+import React, { useMemo, useState, useEffect } from 'react';
+import { Transaction, ProductId, AppSettings, Customer, InventoryItemId, InventoryState, LotMetadata, OnNavigate } from '../types';
 import { FINISHED_PRODUCTS, getProductLotConfig, INVENTORY_ITEMS } from '../constants';
 import EditLotModal from './EditLotModal';
 import { useInventory } from '../hooks/useInventory';
+import { LotNumberDisplay, ProductBadge, SmartLink } from './VisualHelpers';
 
 interface LotHistoryProps {
   transactions: Transaction[];
@@ -13,6 +14,8 @@ interface LotHistoryProps {
   updateTransaction: ReturnType<typeof useInventory>['updateTransaction'];
   deleteTransaction: ReturnType<typeof useInventory>['deleteTransaction'];
   inventory: InventoryState;
+  initialSearchTerm?: string;
+  onNavigate: OnNavigate;
 }
 
 export interface LotAggregated {
@@ -43,10 +46,18 @@ interface ShipmentInfo {
 
 const ITEMS_MAP = new Map(INVENTORY_ITEMS.map(item => [item.id, item]));
 
-const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings, lotMetadata, updateLotMetadata, updateTransaction, deleteTransaction, inventory }) => {
+const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings, lotMetadata, updateLotMetadata, updateTransaction, deleteTransaction, inventory, initialSearchTerm, onNavigate }) => {
     const [expandedLot, setExpandedLot] = useState<string | null>(null);
-    const [searchTerm, setSearchTerm] = useState('');
+    const [searchTerm, setSearchTerm] = useState(initialSearchTerm || '');
     const [editingLot, setEditingLot] = useState<LotAggregated | null>(null);
+
+    // Sync search term if changed from props (Navigation)
+    useEffect(() => {
+        if (initialSearchTerm) {
+            setSearchTerm(initialSearchTerm);
+            setExpandedLot(initialSearchTerm); // Auto-expand if navigating to specific lot
+        }
+    }, [initialSearchTerm]);
 
     const lotData = useMemo(() => {
         const lots: Record<string, LotAggregated> = {};
@@ -94,8 +105,6 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings, lotMeta
 
                 lots[tx.orderNumber].producedQty += (tx.cartonsShipped || 0);
                 
-                // Note: We deliberately do NOT update startDate/endDate from transactions anymore, per requirements.
-
                 // Material Linkage Aggregation (Updated for Arrays)
                 if (tx.materialLinkage) {
                     Object.entries(tx.materialLinkage).forEach(([itemId, stockIds]) => {
@@ -186,9 +195,8 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings, lotMeta
                 for (const pid of lot.productIds) {
                      if (settings.productFormulas[pid as ProductId]) {
                         const formula = settings.productFormulas[pid as ProductId];
-                        const required = (Object.values(formula.rawMaterials) as InventoryItemId[]).filter(
-                            id => !settings.bypassedItems[id]
-                        );
+                        // Updated: Include Capacity Exempt items
+                        const required = (Object.values(formula.rawMaterials) as InventoryItemId[]);
                         const hasMissing = required.some(reqId => !lot.materials[reqId]);
                         if (hasMissing) {
                             lot.missingMaterials = true;
@@ -252,11 +260,48 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings, lotMeta
     }, [lotData]);
 
 
+    // Filter Logic
     const filteredLots = lotData.filter(l => 
         l.lotNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
         l.productNames.some(name => name.toLowerCase().includes(searchTerm.toLowerCase())) ||
         l.customer.toLowerCase().includes(searchTerm.toLowerCase())
     );
+
+    // Grouping Logic: Group filtered lots by Customer and Level
+    const lotsByGroup = useMemo(() => {
+        const groups: Record<string, LotAggregated[]> = {};
+        
+        filteredLots.forEach(lot => {
+            let groupName = lot.customer || 'Unknown';
+            
+            // Sub-divide Alliance based on Lot Number Prefix
+            if (groupName === 'Alliance') {
+                if (lot.lotNumber.startsWith('LV1')) groupName = 'Alliance Level 1';
+                else if (lot.lotNumber.startsWith('LV2')) groupName = 'Alliance Level 2';
+                else if (lot.lotNumber.startsWith('LV3')) groupName = 'Alliance Level 3';
+            }
+            
+            if (!groups[groupName]) groups[groupName] = [];
+            groups[groupName].push(lot);
+        });
+
+        return groups;
+    }, [filteredLots]);
+
+    // Sorting the Groups based on Priority
+    const sortedGroupKeys = useMemo(() => {
+        const keys = Object.keys(lotsByGroup);
+        const priority = ['Alliance Level 1', 'Alliance Level 2', 'Alliance Level 3', 'PHSA', 'PADM'];
+        
+        return keys.sort((a, b) => {
+             const idxA = priority.indexOf(a);
+             const idxB = priority.indexOf(b);
+             if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+             if (idxA !== -1) return -1;
+             if (idxB !== -1) return 1;
+             return a.localeCompare(b);
+        });
+    }, [lotsByGroup]);
 
     const toggleExpand = (lotId: string) => {
         setExpandedLot(prev => prev === lotId ? null : lotId);
@@ -308,7 +353,7 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings, lotMeta
                     ].map(({ key, label }) => {
                         const lot = activeLotsOverview[key];
                         return (
-                            <div key={key} className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 border-l-4 border-brand-red">
+                            <div key={key} className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 border-l-4 border-brand-red border border-gray-200 dark:border-gray-700">
                                 <div className="flex justify-between items-start mb-2">
                                     <h3 className="text-sm font-bold text-gray-900 dark:text-white">{label}</h3>
                                     {lot && (
@@ -320,14 +365,19 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings, lotMeta
                                 {lot ? (
                                     <div className="mt-1">
                                         <div className="text-lg font-mono font-semibold text-brand-dark dark:text-white mb-1 flex items-center">
-                                            {lot.lotNumber}
+                                            <SmartLink 
+                                                type="lot" 
+                                                value={lot.lotNumber} 
+                                                label={<LotNumberDisplay value={lot.lotNumber} />} 
+                                                onNavigate={onNavigate} 
+                                            />
                                             {lot.missingMaterials && (
                                                 <span className="ml-2 text-amber-500" title="Missing Raw Material Linkage">
                                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                                                     </svg>
                                                 </span>
-                                            )}
+                                             )}
                                         </div>
                                         <div className="text-xs text-gray-500 dark:text-gray-400 truncate mb-2">
                                             Since: {lot.startDate ? new Date(lot.startDate).toLocaleDateString() : 'N/A'}
@@ -372,50 +422,72 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings, lotMeta
                             onChange={(e) => setSearchTerm(e.target.value)}
                             className="block w-full pl-10 pr-3 py-2 border-gray-300 focus:outline-none focus:ring-brand-red focus:border-brand-red sm:text-sm rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                         />
+                         {searchTerm && (
+                            <button 
+                                onClick={() => setSearchTerm('')}
+                                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
 
-            <div className="bg-white dark:bg-gray-800 shadow-md rounded-lg overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                        <thead className="bg-gray-50 dark:bg-gray-800">
-                        <tr>
-                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Lot Number</th>
-                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Date Range</th>
-                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Products</th>
-                            <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Produced / Max</th>
-                            <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Shipped</th>
-                            <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">In Stock</th>
-                            <th scope="col" className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
-                            <th scope="col" className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider"></th>
-                        </tr>
-                        </thead>
-                        <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                        {filteredLots.length > 0 ? (
-                            filteredLots.map((lot) => (
+            {/* Loop through Sorted Groups and render tables */}
+            {sortedGroupKeys.map((groupName) => {
+                const customerLots = lotsByGroup[groupName];
+                const impliesLevel = groupName.includes('Level'); // Check if group title implies level
+
+                return (
+                <div key={groupName} className="bg-white dark:bg-gray-800 shadow-md rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 mb-8">
+                    <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 flex justify-between items-center">
+                        <h3 className="text-lg font-bold text-gray-900 dark:text-white">{groupName}</h3>
+                        <span className="text-xs font-medium bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 px-2 py-1 rounded-full">
+                            {customerLots.length} Lots
+                        </span>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                            <thead className="bg-gray-50 dark:bg-gray-800">
+                            <tr>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Lot Number</th>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Date Range</th>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Products</th>
+                                <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Produced / Max</th>
+                                <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Shipped</th>
+                                <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">In Stock</th>
+                                <th scope="col" className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
+                                <th scope="col" className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider"></th>
+                            </tr>
+                            </thead>
+                            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                            {customerLots.map((lot, idx) => (
                                 <React.Fragment key={lot.lotNumber}>
                                     <tr 
-                                        className={`transition-colors ${expandedLot === lot.lotNumber ? 'bg-gray-50 dark:bg-gray-700/50' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
+                                        className={`transition-colors ${idx % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-700/50'} ${expandedLot === lot.lotNumber ? 'bg-gray-100 dark:bg-gray-600' : 'hover:bg-gray-100 dark:hover:bg-gray-600'}`}
                                     >
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-medium text-brand-red dark:text-red-400 flex items-center">
-                                            {lot.lotNumber}
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium flex items-center">
+                                            <LotNumberDisplay value={lot.lotNumber} />
                                             {lot.missingMaterials && (
                                                 <span className="ml-2 text-amber-500" title="Missing Raw Material Linkage">
                                                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                                                     </svg>
                                                 </span>
-                                            )}
+                                             )}
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-500 dark:text-gray-300">
                                             {formatDateRange(lot.startDate, lot.endDate)}
                                         </td>
                                         <td className="px-6 py-4 text-sm text-gray-900 dark:text-white">
-                                            <div className="font-medium max-w-xs break-words">
-                                                {lot.productNames.join(', ')}
+                                            <div className="flex flex-col space-y-1">
+                                                {lot.productNames.map(name => (
+                                                    <ProductBadge key={name} name={name} hideCustomer={true} hideLevel={impliesLevel} />
+                                                ))}
                                             </div>
-                                            <div className="text-xs text-gray-500 dark:text-gray-400">{lot.customer}</div>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-mono text-gray-900 dark:text-white">
                                             {lot.producedQty} / <span className="text-gray-400">{lot.maxCapacity}</span>
@@ -471,7 +543,7 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings, lotMeta
                                                              </div>
                                                          </div>
                                                          
-                                                         {Object.keys(lot.materials).length > 0 ? (
+                                                         {(Object.keys(lot.materials) as string[]).length > 0 ? (
                                                              <div>
                                                                  <div className="flex items-center mb-2">
                                                                      <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Raw Material Traceability</h4>
@@ -483,11 +555,23 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings, lotMeta
                                                                              const itemName = ITEMS_MAP.get(itemId)?.name || itemId;
                                                                              return (
                                                                                  <li key={itemId} className="text-xs flex flex-wrap gap-2 items-center">
-                                                                                     <span className="font-medium text-gray-700 dark:text-gray-300 min-w-[100px]">{itemName}:</span>
+                                                                                     <SmartLink 
+                                                                                        type="inventory" 
+                                                                                        value={itemId} 
+                                                                                        label={itemName} 
+                                                                                        onNavigate={onNavigate}
+                                                                                        className="font-medium text-gray-700 dark:text-gray-300 min-w-[100px] hover:text-blue-600 dark:hover:text-blue-400" 
+                                                                                     />:
                                                                                      <div className="flex flex-wrap gap-1">
-                                                                                        {Array.from(stockIds).map(id => (
+                                                                                        {(Array.from(stockIds) as string[]).map(id => (
                                                                                             <span key={id} className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-600 text-gray-600 dark:text-gray-200 rounded font-mono border border-gray-200 dark:border-gray-500">
-                                                                                                {id}
+                                                                                                <SmartLink 
+                                                                                                    type="stock" 
+                                                                                                    value={id} 
+                                                                                                    label={id} 
+                                                                                                    onNavigate={onNavigate} 
+                                                                                                    className="text-gray-600 dark:text-gray-200 hover:text-blue-600 dark:hover:text-blue-400"
+                                                                                                />
                                                                                             </span>
                                                                                         ))}
                                                                                      </div>
@@ -512,7 +596,7 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings, lotMeta
                                                      <div>
                                                         <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Shipment Allocation Details</h4>
                                                         {lot.shipments.length > 0 ? (
-                                                            <div className="overflow-hidden shadow ring-1 ring-black ring-opacity-5 rounded-lg">
+                                                            <div className="overflow-hidden shadow ring-1 ring-black ring-opacity-5 rounded-lg border border-gray-200 dark:border-gray-600">
                                                                 <table className="min-w-full divide-y divide-gray-300 dark:divide-gray-600">
                                                                     <thead className="bg-gray-100 dark:bg-gray-700">
                                                                         <tr>
@@ -527,7 +611,16 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings, lotMeta
                                                                             <tr key={`${lot.lotNumber}-${shipment.id}`}>
                                                                                 <td className="whitespace-nowrap py-2 pl-4 pr-3 text-sm text-gray-500 dark:text-gray-300">{new Date(shipment.date).toLocaleDateString()}</td>
                                                                                 <td className="whitespace-nowrap px-3 py-2 text-sm text-gray-900 dark:text-white">{shipment.customer}</td>
-                                                                                <td className="whitespace-nowrap px-3 py-2 text-sm text-gray-500 dark:text-gray-300 font-mono">{shipment.orderNumber || '-'}</td>
+                                                                                <td className="whitespace-nowrap px-3 py-2 text-sm text-gray-500 dark:text-gray-300 font-mono">
+                                                                                     {shipment.orderNumber ? (
+                                                                                        <SmartLink 
+                                                                                            type="shipment" 
+                                                                                            value={shipment.orderNumber} 
+                                                                                            label={shipment.orderNumber} 
+                                                                                            onNavigate={onNavigate} 
+                                                                                        />
+                                                                                     ) : '-'}
+                                                                                </td>
                                                                                 <td className="whitespace-nowrap px-3 py-2 text-sm text-right font-mono text-gray-900 dark:text-white">{shipment.quantity}</td>
                                                                             </tr>
                                                                         ))}
@@ -543,18 +636,18 @@ const LotHistory: React.FC<LotHistoryProps> = ({ transactions, settings, lotMeta
                                         </tr>
                                     )}
                                 </React.Fragment>
-                            ))
-                        ) : (
-                            <tr>
-                                <td colSpan={8} className="px-6 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
-                                    No lots found matching your search.
-                                </td>
-                            </tr>
-                        )}
-                        </tbody>
-                    </table>
+                            ))}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
-            </div>
+            )})}
+            
+            {Object.keys(lotsByGroup).length === 0 && (
+                <div className="bg-white dark:bg-gray-800 shadow-md rounded-lg p-12 text-center border border-gray-200 dark:border-gray-700">
+                    <p className="text-gray-500 dark:text-gray-400">No lots found matching your search.</p>
+                </div>
+            )}
         </div>
     );
 };
