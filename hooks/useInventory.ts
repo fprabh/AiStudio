@@ -181,7 +181,7 @@ export const useInventory = () => {
       }));
   }, []);
 
-  const addStock = useCallback((vendorPO: string, date: string, items: Array<{itemId: InventoryItemId, quantity: number, stockId: string, notes: string}>) => {
+  const addStock = useCallback((vendorPO: string, date: string, items: Array<{itemId: InventoryItemId, quantity: number, stockId: string, notes: string}>, photos?: string[]) => {
     if (items.length === 0) return;
 
     const newTransaction: Transaction = {
@@ -200,6 +200,7 @@ export const useInventory = () => {
           notes: item.notes || undefined,
         }
       }),
+      photos: photos
     };
 
     setTransactions(prev => [newTransaction, ...prev]);
@@ -225,7 +226,7 @@ export const useInventory = () => {
     setTransactions(prev => [newTransaction, ...prev]);
   }, []);
 
-  const logShipment = useCallback((productId: ProductId, cartonsShipped: number, orderNumber: string, date?: string, lotAllocations?: Record<string, number>) => {
+  const logShipment = useCallback((productId: ProductId, cartonsShipped: number, orderNumber: string, date?: string, lotAllocations?: Record<string, number>, photos?: string[]) => {
       const product = FINISHED_PRODUCTS.find(p => p.id === productId);
       if (!product) return;
 
@@ -238,12 +239,13 @@ export const useInventory = () => {
           orderNumber: orderNumber || undefined,
           productId: productId,
           cartonsShipped: cartonsShipped,
-          lotAllocations: lotAllocations || undefined
+          lotAllocations: lotAllocations || undefined,
+          photos: photos
       };
       setTransactions(prev => [newTransaction, ...prev]);
   }, []);
 
-  const logBatchShipments = useCallback((items: Array<{productId: ProductId, cartons: number, allocations?: Record<string, number>}>, orderNumber: string, date?: string) => {
+  const logBatchShipments = useCallback((items: Array<{productId: ProductId, cartons: number, allocations?: Record<string, number>}>, orderNumber: string, date?: string, photos?: string[]) => {
         const newTransactions: Transaction[] = [];
         const txDate = date ? new Date(date).toISOString() : new Date().toISOString();
 
@@ -260,7 +262,8 @@ export const useInventory = () => {
                 orderNumber: orderNumber || undefined,
                 productId: item.productId,
                 cartonsShipped: item.cartons,
-                lotAllocations: item.allocations || undefined
+                lotAllocations: item.allocations || undefined,
+                photos: photos
             });
         });
 

@@ -1,12 +1,12 @@
-
 import React, { useState, useMemo } from 'react';
 import { ProductId, View, Customer, ProductState, Transaction, LotState } from '../types';
 import { FINISHED_PRODUCTS } from '../constants';
 import { useInventory } from '../hooks/useInventory';
+import { compressImage } from '../utils';
 
 interface LogShipmentFormProps {
-  logShipment: (productId: ProductId, cartonsShipped: number, orderNumber: string, date?: string, lotAllocations?: Record<string, number>) => void;
-  logBatchShipments: (items: Array<{productId: ProductId, cartons: number, allocations?: Record<string, number>}>, orderNumber: string, date?: string) => void;
+  logShipment: (productId: ProductId, cartonsShipped: number, orderNumber: string, date?: string, lotAllocations?: Record<string, number>, photos?: string[]) => void;
+  logBatchShipments: (items: Array<{productId: ProductId, cartons: number, allocations?: Record<string, number>}>, orderNumber: string, date?: string, photos?: string[]) => void;
   setView: (view: View) => void;
   inventory: ProductState; 
   transactions: Transaction[];
@@ -27,6 +27,7 @@ const LogShipmentForm: React.FC<LogShipmentFormProps> = ({ logBatchShipments, se
   const [customer, setCustomer] = useState<Customer | ''>('');
   const [orderNumber, setOrderNumber] = useState<string>('');
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [photos, setPhotos] = useState<string[]>([]);
   
   // Staged Items
   const [shipmentItems, setShipmentItems] = useState<ShipmentItem[]>([]);
@@ -152,6 +153,23 @@ const LogShipmentForm: React.FC<LogShipmentFormProps> = ({ logBatchShipments, se
       setShipmentItems(prev => prev.filter(item => item.id !== id));
   };
 
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files) {
+          const files = Array.from(e.target.files);
+          const remainingSlots = 5 - photos.length;
+          const filesToProcess = files.slice(0, remainingSlots);
+          
+          if (filesToProcess.length > 0) {
+              const processed = await Promise.all(filesToProcess.map(f => compressImage(f as File)));
+              setPhotos(prev => [...prev, ...processed]);
+          }
+      }
+  };
+
+  const removePhoto = (index: number) => {
+      setPhotos(prev => prev.filter((_, i) => i !== index));
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (shipmentItems.length > 0 && date) {
@@ -162,7 +180,8 @@ const LogShipmentForm: React.FC<LogShipmentFormProps> = ({ logBatchShipments, se
                 allocations: Object.keys(item.allocations).length > 0 ? item.allocations : undefined
             })),
             orderNumber,
-            date
+            date,
+            photos.length > 0 ? photos : undefined
         );
         setView('transactions');
     } else {
@@ -204,6 +223,36 @@ const LogShipmentForm: React.FC<LogShipmentFormProps> = ({ logBatchShipments, se
                   <input type="date" id="date" value={date} onChange={e => setDate(e.target.value)} className="mt-1 block w-full pl-3 pr-3 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-red focus:border-brand-red sm:text-sm rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
               </div>
           </div>
+
+           {/* Photo Proof Section */}
+           <div className="mt-6 border-t border-gray-200 dark:border-gray-700 pt-4">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Photo Proof (Optional, max 5)</label>
+                <div className="flex gap-4 overflow-x-auto pb-2">
+                    {photos.map((photo, index) => (
+                        <div key={index} className="relative w-24 h-24 flex-shrink-0">
+                            <img src={photo} alt="proof" className="w-full h-full object-cover rounded-md border border-gray-300 dark:border-gray-600" />
+                            <button
+                                type="button"
+                                onClick={() => removePhoto(index)}
+                                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600"
+                            >
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                    ))}
+                    {photos.length < 5 && (
+                            <label className="flex-shrink-0 w-24 h-24 rounded-md border-2 border-dashed border-gray-300 dark:border-gray-600 flex flex-col items-center justify-center cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                            <svg className="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                            </svg>
+                            <span className="text-xs text-gray-500 mt-1">Add Photo</span>
+                            <input type="file" accept="image/*" multiple className="hidden" onChange={handlePhotoUpload} />
+                            </label>
+                    )}
+                </div>
+            </div>
       </div>
 
       {/* STAGED ITEMS LIST */}

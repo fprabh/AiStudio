@@ -218,6 +218,25 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
                       const productTxs = txsByProduct[productName];
                       const productTotal = productTxs.reduce((sum, t) => sum + (t.cartonsShipped || 0), 0);
 
+                      // Helper to group by date
+                      const groupedTxs = useMemo(() => {
+                          const groups: Record<string, { date: string; totalCartons: number; txs: ProductionTransaction[] }> = {};
+                          productTxs.forEach(tx => {
+                              const dateStr = new Date(tx.date).toLocaleDateString();
+                              if (!groups[dateStr]) {
+                                  groups[dateStr] = { date: dateStr, totalCartons: 0, txs: [] };
+                              }
+                              groups[dateStr].totalCartons += (tx.cartonsShipped || 0);
+                              groups[dateStr].txs.push(tx);
+                          });
+                          // Sort date desc
+                          return Object.values(groups).sort((a,b) => {
+                              const dA = a.txs[0] ? new Date(a.txs[0].date).getTime() : 0;
+                              const dB = b.txs[0] ? new Date(b.txs[0].date).getTime() : 0;
+                              return dB - dA;
+                          });
+                      }, [productTxs]);
+
                       return (
                           <div key={productName} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
                               <div className="bg-gray-50 dark:bg-gray-700/50 px-4 py-2 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
@@ -239,41 +258,77 @@ const ProductionHistory: React.FC<ProductionHistoryProps> = ({ transactions, upd
                                     </tr>
                                   </thead>
                                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                                    {productTxs.map(t => (
-                                      <tr key={t.id} className="odd:bg-white even:bg-gray-50 dark:odd:bg-gray-800 dark:even:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors">
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
-                                          {new Date(t.date).toLocaleDateString()}
-                                        </td>
-                                         <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-300 font-mono min-w-[150px] flex items-center">
-                                            {t.orderNumber ? (
-                                                <SmartLink 
-                                                    type="lot" 
-                                                    value={t.orderNumber} 
-                                                    label={<LotNumberDisplay value={t.orderNumber} />} 
-                                                    onNavigate={onNavigate} 
-                                                />
-                                            ) : '-'}
-                                             {t.missingMaterials && (
-                                                <span className="ml-2 text-amber-500" title="Missing Raw Material Linkage">
-                                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                                    </svg>
-                                                </span>
-                                             )}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 dark:text-white font-bold font-mono">
-                                             {t.cartonsShipped?.toLocaleString()}
-                                        </td>
-                                        {isManageMode && (
+                                    {isManageMode ? (
+                                        // Detailed View for Management
+                                        productTxs.map(t => (
+                                          <tr key={t.id} className="odd:bg-white even:bg-gray-50 dark:odd:bg-gray-800 dark:even:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors">
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
+                                              {new Date(t.date).toLocaleDateString()}
+                                            </td>
+                                             <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-300 font-mono min-w-[150px] flex items-center">
+                                                {t.orderNumber ? (
+                                                    <SmartLink 
+                                                        type="lot" 
+                                                        value={t.orderNumber} 
+                                                        label={<LotNumberDisplay value={t.orderNumber} />} 
+                                                        onNavigate={onNavigate} 
+                                                    />
+                                                ) : '-'}
+                                                 {t.missingMaterials && (
+                                                    <span className="ml-2 text-amber-500" title="Missing Raw Material Linkage">
+                                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                                        </svg>
+                                                    </span>
+                                                 )}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 dark:text-white font-bold font-mono">
+                                                 {t.cartonsShipped?.toLocaleString()}
+                                            </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                                 <div className="flex justify-end space-x-3 items-center">
                                                     <button onClick={() => setEditingTransaction(t)} className="text-brand-red hover:text-red-900 dark:text-red-400 dark:hover:text-red-300">Edit</button>
                                                     <button onClick={() => setItemToDelete(t.id)} className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200">Delete</button>
                                                 </div>
                                             </td>
-                                        )}
-                                      </tr>
-                                    ))}
+                                          </tr>
+                                        ))
+                                    ) : (
+                                        // Grouped View for Read-Only
+                                        groupedTxs.map(group => (
+                                            <tr key={group.date} className="odd:bg-white even:bg-gray-50 dark:odd:bg-gray-800 dark:even:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors">
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300 align-top">
+                                                    {group.date}
+                                                </td>
+                                                <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-300 font-mono align-top">
+                                                    <div className="flex flex-col gap-1">
+                                                        {group.txs.map(t => (
+                                                            <div key={t.id} className="flex items-center">
+                                                                {t.orderNumber ? (
+                                                                    <SmartLink 
+                                                                        type="lot" 
+                                                                        value={t.orderNumber} 
+                                                                        label={<LotNumberDisplay value={t.orderNumber} />} 
+                                                                        onNavigate={onNavigate} 
+                                                                    />
+                                                                ) : '-'}
+                                                                {t.missingMaterials && (
+                                                                    <span className="ml-2 text-amber-500" title="Missing Raw Material Linkage">
+                                                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                                                        </svg>
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 dark:text-white font-bold font-mono align-top">
+                                                    {group.totalCartons.toLocaleString()}
+                                                </td>
+                                            </tr>
+                                        ))
+                                    )}
                                   </tbody>
                                 </table>
                               </div>

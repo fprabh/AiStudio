@@ -6,6 +6,7 @@ import { useInventory } from '../hooks/useInventory';
 import EditTransactionModal from './EditTransactionModal';
 import ConfirmationModal from './ConfirmationModal';
 import StockUsageModal from './StockUsageModal';
+import PhotoGalleryModal from './PhotoGalleryModal';
 import { SmartLink } from './VisualHelpers';
 
 interface StockHistoryProps {
@@ -54,6 +55,10 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
 
   // Usage Modal State
   const [usageModalData, setUsageModalData] = useState<{ stockId: string, itemId: InventoryItemId, itemName: string } | null>(null);
+  
+  // Photo Gallery State
+  const [galleryPhotos, setGalleryPhotos] = useState<string[] | null>(null);
+  const [galleryTitle, setGalleryTitle] = useState<string>('');
 
   // Effect to auto-open modal if stock ID is provided via navigation
   useEffect(() => {
@@ -79,6 +84,11 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
       key,
       direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc',
     }));
+  };
+
+  const handleOpenGallery = (photos: string[], title: string) => {
+      setGalleryPhotos(photos);
+      setGalleryTitle(title);
   };
 
   // --- DATA PROCESSING FOR 'BY ITEM' VIEW ---
@@ -249,7 +259,8 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
       const mergedTx: Transaction = {
           ...base,
           details: combinedDetails,
-          description: `Stock Received ${base.orderNumber ? `(PO: ${base.orderNumber})` : '(No PO)'}`
+          description: `Stock Received ${base.orderNumber ? `(PO: ${base.orderNumber})` : '(No PO)'}`,
+          photos: base.photos // Preserve photos from first tx
       };
 
       setIdsToMerge(txs.slice(1).map(t => t.id)); // Store IDs of subsumed transactions
@@ -377,6 +388,14 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
                 transactions={transactions}
                 onClose={() => setUsageModalData(null)}
                 onNavigate={onNavigate}
+            />
+        )}
+        {galleryPhotos && (
+            <PhotoGalleryModal
+                photos={galleryPhotos}
+                readOnly={true}
+                title={galleryTitle}
+                onClose={() => setGalleryPhotos(null)}
             />
         )}
         <ConfirmationModal 
@@ -567,6 +586,7 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
                               // If merging multiple transactions, we take the first one for primary status
                               const primaryTx = group.txs[0];
                               const allDetails = group.txs.flatMap(tx => tx.details);
+                              const hasPhotos = primaryTx.photos && primaryTx.photos.length > 0;
                               
                               return (
                               <div key={`${dateStr}-${group.orderNumber}-${gIdx}`} className={`bg-white dark:bg-gray-800 rounded-lg shadow-md border-l-4 overflow-hidden ${
@@ -592,6 +612,20 @@ const StockHistory: React.FC<StockHistoryProps> = ({ transactions, updateTransac
                                               {primaryTx.displayStatus === 'new' && <span className="bg-green-100 text-green-800 text-[10px] px-1.5 py-0.5 rounded font-bold uppercase">New</span>}
                                               {primaryTx.displayStatus === 'modified-original' && <span className="bg-yellow-100 text-yellow-800 text-[10px] px-1.5 py-0.5 rounded font-bold uppercase">Modified</span>}
                                               {primaryTx.displayStatus === 'deleted' && <span className="bg-red-100 text-red-800 text-[10px] px-1.5 py-0.5 rounded font-bold uppercase">Deleted</span>}
+                                              
+                                              {/* Photo Badge */}
+                                              {hasPhotos && (
+                                                  <button 
+                                                      onClick={() => handleOpenGallery(primaryTx.photos!, `Photos for PO: ${group.orderNumber || 'Unknown'}`)}
+                                                      className="ml-2 bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 px-2 py-0.5 rounded-full text-xs font-semibold flex items-center hover:bg-purple-200 dark:hover:bg-purple-800 transition-colors"
+                                                  >
+                                                      <svg className="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                      </svg>
+                                                      {primaryTx.photos!.length} Photos
+                                                  </button>
+                                              )}
                                           </h4>
                                           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                                               {group.txs.length > 1 ? `Merged ${group.txs.length} transactions` : primaryTx.description}

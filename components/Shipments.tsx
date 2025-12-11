@@ -5,6 +5,7 @@ import { FINISHED_PRODUCTS } from '../constants';
 import { useInventory } from '../hooks/useInventory';
 import EditTransactionModal from './EditTransactionModal';
 import ConfirmationModal from './ConfirmationModal';
+import PhotoGalleryModal from './PhotoGalleryModal';
 import { ProductBadge, LotNumberDisplay, SmartLink } from './VisualHelpers';
 
 interface ShipmentsProps {
@@ -38,6 +39,12 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
   const [showSaveConfirmation, setShowSaveConfirmation] = useState(false);
+
+  // Photo Gallery State
+  const [galleryPhotos, setGalleryPhotos] = useState<string[] | null>(null);
+  const [galleryTitle, setGalleryTitle] = useState<string>('');
+  // New: Group Photo Management State
+  const [managingPhotosGroup, setManagingPhotosGroup] = useState<{ ids: string[], currentPhotos: string[] } | null>(null);
 
   // Pre-calculate DB stats for accurate "Available" calculation
   const dbStats = useMemo(() => {
@@ -108,24 +115,17 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
             if (isDeleted) status = 'deleted';
             else if (updatedTx) status = 'modified-original';
             
+            // If updated, use the updated transaction but ensure we display it correctly
+            const txToUse = updatedTx ? updatedTx : originalTx;
+
             grouped[originalProduct.customer].push({
-                ...originalTx,
+                ...txToUse,
                 productName: originalProduct.name,
-                displayStatus: status
+                displayStatus: updatedTx ? 'new' : status
             });
         }
-
-        if (updatedTx) {
-             const updatedProduct = FINISHED_PRODUCTS.find(p => p.id === updatedTx.productId);
-             if (updatedProduct) {
-                 if (!grouped[updatedProduct.customer]) grouped[updatedProduct.customer] = [];
-                 grouped[updatedProduct.customer].push({
-                     ...updatedTx,
-                     productName: updatedProduct.name,
-                     displayStatus: 'new'
-                 });
-             }
-        }
+        
+        // Handle strictly new transactions if we had add functionality here (currently LogShipment is separate)
     });
 
     // Final sorting for each customer: Date Desc, then PO Number
@@ -203,6 +203,48 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
       setPendingUpdates(new Map());
   };
 
+  const handleOpenGallery = (photos: string[], title: string) => {
+      setGalleryPhotos(photos);
+      setGalleryTitle(title);
+  };
+
+  const initiateGroupPhotoEdit = (group: { rows: ShipmentTransaction[], orderNumber: string }) => {
+      const currentPhotos = group.rows[0]?.photos || [];
+      const ids = group.rows.map(r => r.id);
+      setManagingPhotosGroup({ ids, currentPhotos });
+  };
+
+  const handleGroupPhotoUpdate = (newPhotos: string[]) => {
+      if (!managingPhotosGroup) return;
+      
+      const { ids } = managingPhotosGroup;
+      
+      // Update all transactions in this group
+      setPendingUpdates(prev => {
+          const next = new Map(prev);
+          
+          ids.forEach(id => {
+              // Find the latest version of the transaction
+              const existingPending = next.get(id);
+              const original = transactions.find(t => t.id === id);
+              
+              const base = existingPending || original;
+              
+              if (base) {
+                  next.set(id, { ...base, photos: newPhotos });
+              }
+          });
+          
+          return next;
+      });
+      
+      // Update local state to reflect change immediately in modal if needed (though modal usually closes/updates via parent rerender)
+      // Actually PhotoGalleryModal calls onUpdate then stays open or we can close it?
+      // Typically PhotoGalleryModal updates internal state, but here we are controlling it via re-render.
+      // We should probably update the `managingPhotosGroup` state to reflect new photos so UI doesn't flicker if modal stays open.
+      setManagingPhotosGroup(prev => prev ? { ...prev, currentPhotos: newPhotos } : null);
+  };
+
   const getRowStyle = (status?: ShipmentTransaction['displayStatus']) => {
       if (status === 'deleted' || status === 'modified-original') return "bg-gray-50 dark:bg-gray-800 opacity-60 text-gray-400 line-through hover:bg-gray-100";
       if (status === 'new') return "bg-green-50 dark:bg-green-900/20 border-l-2 border-green-500";
@@ -221,6 +263,23 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
                 inventory={undefined}
                 transactions={transactions}
                 lotState={effectiveLotState}
+            />
+        )}
+        {galleryPhotos && (
+            <PhotoGalleryModal
+                photos={galleryPhotos}
+                readOnly={true}
+                title={galleryTitle}
+                onClose={() => setGalleryPhotos(null)}
+            />
+        )}
+        {managingPhotosGroup && (
+            <PhotoGalleryModal
+                photos={managingPhotosGroup.currentPhotos}
+                readOnly={false}
+                title="Manage Shipment Photos"
+                onClose={() => setManagingPhotosGroup(null)}
+                onUpdate={handleGroupPhotoUpdate}
             />
         )}
         <ConfirmationModal 
@@ -349,6 +408,7 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
                             const isFirstInGroup = idx === 0;
                             const totalAllocated = t.lotAllocations ? Object.values(t.lotAllocations).reduce((a: number, b: number) => a + b, 0) : 0;
                             const isAllocatedFully = totalAllocated === (t.cartonsShipped || 0);
+                            const hasPhotos = t.photos && t.photos.length > 0;
 
                             return (
                                 <tr key={`${t.id}-${t.displayStatus}`} className={getRowStyle(t.displayStatus)}>
@@ -359,12 +419,55 @@ const Shipments: React.FC<ShipmentsProps> = ({ transactions, updateTransaction, 
                                                 {group.date}
                                             </td>
                                             <td rowSpan={group.rows.length} className="px-6 py-4 text-sm text-gray-500 dark:text-gray-300 font-mono align-top border-r border-gray-100 dark:border-gray-700">
-                                                {group.orderNumber || '-'}
-                                                {group.rows.length > 1 && group.orderNumber && (
-                                                    <div className="text-[10px] bg-gray-100 dark:bg-gray-600 text-gray-500 dark:text-gray-300 px-1 rounded w-fit mt-1">
-                                                        Total: {group.totalQty}
-                                                    </div>
-                                                )}
+                                                <div className="flex flex-col gap-1 items-start">
+                                                    <span>{group.orderNumber || '-'}</span>
+                                                    {group.rows.length > 1 && group.orderNumber && (
+                                                        <div className="text-[10px] bg-gray-100 dark:bg-gray-600 text-gray-500 dark:text-gray-300 px-1 rounded w-fit">
+                                                            Total: {group.totalQty}
+                                                        </div>
+                                                    )}
+                                                    
+                                                    {/* Photo Management Logic */}
+                                                    {isEditMode ? (
+                                                        <div className="mt-2">
+                                                            {hasPhotos ? (
+                                                                <button
+                                                                    onClick={() => initiateGroupPhotoEdit(group)}
+                                                                    className="text-xs bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 px-2 py-1 rounded border border-purple-200 dark:border-purple-800 flex items-center hover:bg-purple-200 dark:hover:bg-purple-900/60 transition-colors w-full justify-center"
+                                                                >
+                                                                    <svg className="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L15.232 5.232z" />
+                                                                    </svg>
+                                                                    {group.rows[0].photos?.length} Photos
+                                                                </button>
+                                                            ) : (
+                                                                <button
+                                                                    onClick={() => initiateGroupPhotoEdit(group)}
+                                                                    className="text-xs text-gray-500 dark:text-gray-400 border border-dashed border-gray-300 dark:border-gray-600 px-2 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors w-full flex justify-center items-center"
+                                                                >
+                                                                    <svg className="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                                                    </svg>
+                                                                    Add Photo
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    ) : (
+                                                        /* Read Only Photo Badge */
+                                                        hasPhotos && (
+                                                            <button 
+                                                                onClick={() => handleOpenGallery(group.rows[0].photos!, `Shipment Photos: ${group.orderNumber}`)}
+                                                                className="mt-1 text-xs bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 px-2 py-0.5 rounded-full flex items-center hover:bg-purple-200 dark:hover:bg-purple-900/60"
+                                                            >
+                                                                <svg className="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                                </svg>
+                                                                {group.rows[0].photos!.length}
+                                                            </button>
+                                                        )
+                                                    )}
+                                                </div>
                                             </td>
                                         </>
                                     )}

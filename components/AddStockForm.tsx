@@ -1,7 +1,7 @@
-
 import React, { useState, useMemo } from 'react';
 import { InventoryItemId, View, Transaction, InventoryState, AppSettings } from '../types';
 import { INVENTORY_ITEMS } from '../constants';
+import { compressImage } from '../utils';
 
 type ItemLine = {
     id: number;
@@ -12,7 +12,7 @@ type ItemLine = {
 }
 
 interface AddStockFormProps {
-  addStock: (vendorPO: string, date: string, items: Array<{itemId: InventoryItemId, quantity: number, stockId: string, notes: string}>) => void;
+  addStock: (vendorPO: string, date: string, items: Array<{itemId: InventoryItemId, quantity: number, stockId: string, notes: string}>, photos?: string[]) => void;
   setView: (view: View) => void;
   inventory: InventoryState;
   transactions: Transaction[];
@@ -25,6 +25,7 @@ const AddStockForm: React.FC<AddStockFormProps> = ({ addStock, setView, inventor
   const [items, setItems] = useState<ItemLine[]>([
       { id: Date.now(), itemId: '', quantity: '', stockId: '', notes: '' }
   ]);
+  const [photos, setPhotos] = useState<string[]>([]);
   
   const handleItemChange = (id: number, field: keyof Omit<ItemLine, 'id'>, value: string) => {
       setItems(prevItems => prevItems.map(item => item.id === id ? { ...item, [field]: value } : item));
@@ -36,6 +37,23 @@ const AddStockForm: React.FC<AddStockFormProps> = ({ addStock, setView, inventor
   
   const handleRemoveItem = (id: number) => {
       setItems(prevItems => prevItems.filter(item => item.id !== id));
+  };
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files) {
+          const files = Array.from(e.target.files);
+          const remainingSlots = 5 - photos.length;
+          const filesToProcess = files.slice(0, remainingSlots);
+          
+          if (filesToProcess.length > 0) {
+              const processed = await Promise.all(filesToProcess.map(f => compressImage(f as File)));
+              setPhotos(prev => [...prev, ...processed]);
+          }
+      }
+  };
+
+  const removePhoto = (index: number) => {
+      setPhotos(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -50,7 +68,7 @@ const AddStockForm: React.FC<AddStockFormProps> = ({ addStock, setView, inventor
                             }));
 
     if (validItems.length > 0 && date) {
-      addStock(vendorPO, date, validItems);
+      addStock(vendorPO, date, validItems, photos.length > 0 ? photos : undefined);
       setView('stockHistory');
     } else {
       alert('Please add at least one valid item with an item type and quantity.');
@@ -149,6 +167,36 @@ const AddStockForm: React.FC<AddStockFormProps> = ({ addStock, setView, inventor
                             className="mt-1 block w-full input-base"
                             required
                         />
+                    </div>
+                </div>
+
+                {/* Photo Proof Section */}
+                <div className="mt-6 border-t border-gray-200 dark:border-gray-700 pt-4">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Photo Proof (Optional, max 5)</label>
+                    <div className="flex gap-4 overflow-x-auto pb-2">
+                        {photos.map((photo, index) => (
+                            <div key={index} className="relative w-24 h-24 flex-shrink-0">
+                                <img src={photo} alt="proof" className="w-full h-full object-cover rounded-md border border-gray-300 dark:border-gray-600" />
+                                <button
+                                    type="button"
+                                    onClick={() => removePhoto(index)}
+                                    className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600"
+                                >
+                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                        ))}
+                        {photos.length < 5 && (
+                             <label className="flex-shrink-0 w-24 h-24 rounded-md border-2 border-dashed border-gray-300 dark:border-gray-600 flex flex-col items-center justify-center cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                                <svg className="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                </svg>
+                                <span className="text-xs text-gray-500 mt-1">Add Photo</span>
+                                <input type="file" accept="image/*" multiple className="hidden" onChange={handlePhotoUpload} />
+                             </label>
+                        )}
                     </div>
                 </div>
             </div>

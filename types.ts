@@ -58,6 +58,8 @@ export interface Transaction {
   lotAllocations?: Record<string, number>; // LotNumber -> Quantity Used
   // For PRODUCTION - Track which Raw Material Stock IDs were used
   materialLinkage?: Partial<Record<InventoryItemId, string[]>>; // ItemId -> Array of StockIDs
+  // Photo Proof
+  photos?: string[]; // Array of Base64 strings
 }
 
 export type ProductId = 
