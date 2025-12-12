@@ -2,6 +2,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View } from '../types';
 import { Theme } from '../hooks/useTheme';
+import Logo from '../Logo.png';
+
 
 interface HeaderProps {
   setView: (view: View) => void;
@@ -126,6 +128,13 @@ const Header: React.FC<HeaderProps> = ({ setView, currentView, theme, toggleThem
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 relative">
           <div className="flex items-center">
+            <button
+              onClick={() => setView('dashboard')}
+              className="flex items-center mr-3 focus:outline-none"
+              aria-label="Go to dashboard"
+            >
+              <img src={Logo} alt="Logo" className="h-8 w-auto" />
+            </button>
             <nav className="flex items-center space-x-1 sm:space-x-2">
                
                <NavItem label="Dashboard" viewName="dashboard" currentView={currentView} onClick={setView} icon={icons.dashboard}/>
