@@ -174,8 +174,9 @@ const Settings: React.FC<SettingsProps> = ({ settings: initialSettings, updateSe
                         <input id="masksPerRollNosewire" type="number" className={fullInputClass} value={localSettings.materialUsage.masksPerRollNosewire} onChange={e => handleSettingsChange('materialUsage', 'masksPerRollNosewire', '', parseFloat(e.target.value) || 0)} />
                     </div>
                     <div>
-                        <label htmlFor="masksPerRollElastic" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Elastic</label>
+                        <label htmlFor="masksPerRollElastic" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Elastic (Single Roll)</label>
                         <input id="masksPerRollElastic" type="number" className={fullInputClass} value={localSettings.materialUsage.masksPerRollElastic} onChange={e => handleSettingsChange('materialUsage', 'masksPerRollElastic', '', parseFloat(e.target.value) || 0)} />
+                         <p className="text-xs text-gray-500 mt-1">Consumption automatically doubled for left/right sides.</p>
                     </div>
                 </div>
             </div>

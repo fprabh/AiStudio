@@ -45,6 +45,11 @@ const calculateMaxPallets = (product: typeof FINISHED_PRODUCTS[0], inventory: In
         if (itemInfo?.unit === 'rolls') {
              const masksPerRoll = getMasksPerRoll(itemId, settings);
              requiredQty = (masksPerPallet / masksPerRoll) * rejection;
+
+             // FIX: Elastic requires 2 rolls per mask production run
+             if (itemId === 'elastic') {
+                 requiredQty *= 2;
+             }
         }
         requirementsPerPallet[itemId] = requiredQty;
     });

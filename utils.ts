@@ -34,6 +34,11 @@ export const calculateDeductions = (productId: ProductId, cartonsShipped: number
         if(itemInfo?.unit === 'rolls') {
             const masksPerRoll = getMasksPerRoll(itemId, settings);
             quantity = totalMasks / masksPerRoll;
+
+            // FIX: Elastic requires 2 rolls (Left/Right) per mask production run
+            if (itemId === 'elastic') {
+                quantity *= 2;
+            }
         } 
         
         const rejectionRate = settings.rejectionCoefficients[itemId] || 0;
