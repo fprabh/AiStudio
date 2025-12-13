@@ -134,6 +134,7 @@ const App: React.FC = () => {
                   inventory={inventoryData.inventory} 
                   settings={inventoryData.settings}
                   updateSettings={inventoryData.updateSettings}
+                  productInventory={inventoryData.productInventory}
                />;
       case 'logShipment':
         return <LogShipmentForm 

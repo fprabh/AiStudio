@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { ProductId, View, Customer, InventoryState, InventoryItemId, AppSettings, LotLevel } from '../types';
+import { ProductId, View, Customer, InventoryState, ProductState, InventoryItemId, AppSettings, LotLevel } from '../types';
 import { FINISHED_PRODUCTS, INVENTORY_ITEMS, getProductLotConfig } from '../constants';
 import { useInventory } from '../hooks/useInventory';
 
@@ -8,6 +8,7 @@ interface LogProductionFormProps {
   logProduction: (productId: ProductId, cartonsProduced: number, orderNumber: string, date?: string, materialLinkage?: Partial<Record<InventoryItemId, string[]>>) => void;
   setView: (view: View) => void;
   inventory: InventoryState;
+  productInventory: ProductState;
   settings: ReturnType<typeof useInventory>['settings'];
   updateSettings: ReturnType<typeof useInventory>['updateSettings'];
 }
@@ -34,7 +35,7 @@ const getMasksPerRoll = (itemId: InventoryItemId, settings: AppSettings): number
     return 1; 
 };
 
-const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, setView, inventory, settings, updateSettings }) => {
+const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, setView, inventory, productInventory, settings, updateSettings }) => {
   const { transactions } = useInventory(); 
   const [customer, setCustomer] = useState<Customer | ''>('');
   const [productId, setProductId] = useState<ProductId | ''>('');
@@ -47,6 +48,18 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
   const availableProducts = useMemo(() => {
     return customer ? FINISHED_PRODUCTS.filter(p => p.customer === customer) : [];
   }, [customer]);
+
+  // Calculate Finished Good Impact
+  const finishedGoodImpact = useMemo(() => {
+      if (!productId) return null;
+      const current = productInventory[productId] || 0;
+      const adding = parseFloat(cartons) || 0;
+      return {
+          current,
+          adding,
+          next: current + adding
+      };
+  }, [productId, cartons, productInventory]);
 
   // Determine required raw materials for traceability
   const requiredTraceabilityItems = useMemo(() => {
@@ -321,6 +334,13 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
             <div>
               <label htmlFor="cartons" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Cartons Produced</label>
               <input type="number" id="cartons" value={cartons} onChange={e => setCartons(e.target.value)} min="1" className="mt-1 block w-full pl-3 pr-3 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-red focus:border-brand-red sm:text-sm rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+              {finishedGoodImpact && (
+                  <div className="mt-2 text-xs bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-300 p-2 rounded border border-green-100 dark:border-green-800/30 flex items-center justify-between">
+                      <span>Stock: <span className="font-mono">{finishedGoodImpact.current.toLocaleString()}</span></span>
+                      <span className="font-bold">+ {finishedGoodImpact.adding.toLocaleString()}</span>
+                      <span>New: <span className="font-mono font-bold">{finishedGoodImpact.next.toLocaleString()}</span></span>
+                  </div>
+              )}
             </div>
             <div>
               <label htmlFor="date" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Production Date</label>
