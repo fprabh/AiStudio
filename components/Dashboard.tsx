@@ -45,8 +45,8 @@ const calculateConstraints = (product: typeof FINISHED_PRODUCTS[0], inventory: I
     const addConstraint = (itemId: InventoryItemId, requiredQty: number) => {
         const stock = inventory[itemId] || 0;
         const item = ITEMS_MAP.get(itemId);
-        // If requiredQty is 0, max is Infinity
-        const max = requiredQty > 0 ? Math.floor(stock / requiredQty) : Infinity;
+        // If requiredQty is 0, max is Infinity. Ensure result is non-negative.
+        const max = requiredQty > 0 ? Math.max(0, Math.floor(stock / requiredQty)) : Infinity;
         
         constraints.push({
             itemId,
