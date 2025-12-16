@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { InventoryState, View, InventoryItemId, ProductId, ProductState, AppSettings, OnNavigate } from '../types';
 import { INVENTORY_ITEMS, FINISHED_PRODUCTS } from '../constants';
 import { useInventory } from '../hooks/useInventory';
@@ -12,6 +12,14 @@ type DashboardProps = {
   settings: ReturnType<typeof useInventory>['settings'];
   onNavigate: OnNavigate;
 };
+
+interface Constraint {
+    itemId: InventoryItemId;
+    name: string;
+    stock: number;
+    unit: string;
+    maxPallets: number;
+}
 
 const ITEMS_MAP = new Map(INVENTORY_ITEMS.map(item => [item.id, item]));
 
@@ -26,18 +34,33 @@ const getMasksPerRoll = (itemId: InventoryItemId, settings: AppSettings): number
     return 1; 
 };
 
-const calculateMaxPallets = (product: typeof FINISHED_PRODUCTS[0], inventory: InventoryState, settings: DashboardProps['settings']): number => {
+const calculateConstraints = (product: typeof FINISHED_PRODUCTS[0], inventory: InventoryState, settings: AppSettings): Constraint[] => {
     const rule = settings.productFormulas[product.id];
-    if (!rule) return 0;
+    if (!rule) return [];
     
     const masksPerPallet = rule.masksPerBox * rule.boxesPerCarton * rule.cartonsPerPallet;
+    const constraints: Constraint[] = [];
 
-    const requirementsPerPallet: Partial<Record<InventoryItemId, number>> = {};
-    
+    // Helper to add constraint
+    const addConstraint = (itemId: InventoryItemId, requiredQty: number) => {
+        const stock = inventory[itemId] || 0;
+        const item = ITEMS_MAP.get(itemId);
+        // If requiredQty is 0, max is Infinity
+        const max = requiredQty > 0 ? Math.floor(stock / requiredQty) : Infinity;
+        
+        constraints.push({
+            itemId,
+            name: item?.name || itemId,
+            stock,
+            unit: item?.unit || '',
+            maxPallets: max
+        });
+    };
+
     // Raw Materials
     Object.values(rule.rawMaterials).forEach(unknownItemId => {
         const itemId = unknownItemId as InventoryItemId;
-        if (settings.bypassedItems[itemId]) return;
+        // NOTE: Bypass check removed as requested
         const rejection = 1 + (settings.rejectionCoefficients[itemId] || 0) / 100;
         let requiredQty = 0;
         
@@ -51,29 +74,32 @@ const calculateMaxPallets = (product: typeof FINISHED_PRODUCTS[0], inventory: In
                  requiredQty *= 2;
              }
         }
-        requirementsPerPallet[itemId] = requiredQty;
+        addConstraint(itemId, requiredQty);
     });
 
     // Packaging Materials
-    if (!settings.bypassedItems[rule.packaging.box]) {
-        requirementsPerPallet[rule.packaging.box] = rule.boxesPerCarton * rule.cartonsPerPallet;
-    }
-    if (!settings.bypassedItems[rule.packaging.carton]) {
-        requirementsPerPallet[rule.packaging.carton] = rule.cartonsPerPallet;
-    }
+    addConstraint(rule.packaging.box, rule.boxesPerCarton * rule.cartonsPerPallet);
+    addConstraint(rule.packaging.carton, rule.cartonsPerPallet);
 
-    if (Object.keys(requirementsPerPallet).length === 0) return Infinity; // All items bypassed
-
-    const possiblePalletsPerItem = Object.entries(requirementsPerPallet).map(([itemId, requiredQty]) => {
-        const stock = inventory[itemId as InventoryItemId] || 0;
-        return requiredQty > 0 ? Math.floor(stock / requiredQty) : Infinity;
+    // Sort by maxPallets ASC to find tightest bottlenecks first
+    return constraints.sort((a, b) => {
+        if (a.maxPallets !== b.maxPallets) return a.maxPallets - b.maxPallets;
+        return a.name.localeCompare(b.name);
     });
-    
-    return Math.max(0, Math.min(...possiblePalletsPerItem));
 };
 
 const Dashboard: React.FC<DashboardProps> = ({ inventory, productInventory, setView, settings, onNavigate }) => {
-    // Logic Update: Removed check for settings.bypassedItems so alerts show for exempt items
+    // Local state to track which bottleneck index to show for each product
+    const [bottleneckIndices, setBottleneckIndices] = useState<Record<string, number>>({});
+
+    const handleConstraintNav = (productId: string, direction: -1 | 1, maxIndex: number) => {
+        setBottleneckIndices(prev => {
+            const current = prev[productId] || 0;
+            const next = Math.max(0, Math.min(maxIndex, current + direction));
+            return { ...prev, [productId]: next };
+        });
+    };
+
     const lowStockItems = INVENTORY_ITEMS
         .filter(item => {
             const currentStock = inventory[item.id] || 0;
@@ -102,7 +128,6 @@ const Dashboard: React.FC<DashboardProps> = ({ inventory, productInventory, setV
                         {lowStockItems.map(item => {
                             const currentStock = inventory[item.id] || 0;
                             const formatStock = (stock: number) => item.unit === 'rolls' ? stock.toFixed(2) : stock.toLocaleString();
-                            const isExempt = settings.bypassedItems[item.id];
                             return (
                                 <li key={item.id} className="py-3 flex justify-between items-center">
                                     <div>
@@ -114,7 +139,6 @@ const Dashboard: React.FC<DashboardProps> = ({ inventory, productInventory, setV
                                                 onNavigate={onNavigate} 
                                                 className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
                                             />
-                                            {isExempt && <span className="ml-2 text-[10px] bg-purple-100 text-purple-800 px-1 rounded dark:bg-purple-900 dark:text-purple-300">Exempt</span>}
                                         </p>
                                         <p className="text-xs text-gray-400 dark:text-gray-500">
                                             Low Threshold: {settings.stockThresholds[item.id]?.low} {item.unit}
@@ -212,19 +236,79 @@ const Dashboard: React.FC<DashboardProps> = ({ inventory, productInventory, setV
                         <tr>
                             <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Product SKU</th>
                             <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Customer</th>
-                            <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Max Pallets Producible</th>
+                            <th scope="col" className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider w-1/3">Limiting Factor (Bottleneck)</th>
+                            <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Max Pallets</th>
                         </tr>
                     </thead>
                     <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                         {FINISHED_PRODUCTS.map(product => {
-                            const maxPallets = calculateMaxPallets(product, inventory, settings);
+                            const constraints = calculateConstraints(product, inventory, settings);
+                            const currentIndex = bottleneckIndices[product.id] || 0;
+                            const activeConstraint = constraints[currentIndex];
+                            
+                            // Safeguard if constraints is empty (unlikely with valid settings)
+                            const maxPallets = activeConstraint ? activeConstraint.maxPallets : 0;
+                            
+                            const formatStock = (val: number, unit: string) => unit === 'rolls' ? val.toFixed(2) : val.toLocaleString();
+
                             return (
                             <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
                                     <ProductBadge name={product.name} />
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{product.customer}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500 dark:text-gray-300 font-semibold">{maxPallets.toLocaleString()}</td>
+                                
+                                <td className="px-6 py-4 whitespace-nowrap text-center">
+                                    {activeConstraint ? (
+                                        <div className="flex items-center justify-center space-x-2">
+                                            <button 
+                                                onClick={() => handleConstraintNav(product.id, -1, constraints.length - 1)}
+                                                disabled={currentIndex === 0}
+                                                className={`p-1 rounded-full ${currentIndex === 0 ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-200 dark:text-gray-400 dark:hover:bg-gray-600'}`}
+                                            >
+                                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                                                </svg>
+                                            </button>
+                                            
+                                            <div className="flex flex-col items-center w-48">
+                                                <span className={`text-sm font-bold truncate max-w-full ${currentIndex === 0 ? 'text-red-600 dark:text-red-400' : 'text-yellow-600 dark:text-yellow-400'}`}>
+                                                    <SmartLink 
+                                                        type="inventory" 
+                                                        value={activeConstraint.itemId} 
+                                                        label={activeConstraint.name} 
+                                                        onNavigate={onNavigate} 
+                                                        className={`hover:underline ${currentIndex === 0 ? 'text-red-600 dark:text-red-400' : 'text-yellow-600 dark:text-yellow-400'}`}
+                                                    />
+                                                </span>
+                                                <span className="text-xs text-gray-500 dark:text-gray-400">
+                                                    Stock: {formatStock(activeConstraint.stock, activeConstraint.unit)} {activeConstraint.unit}
+                                                </span>
+                                            </div>
+
+                                            <button 
+                                                onClick={() => handleConstraintNav(product.id, 1, constraints.length - 1)}
+                                                disabled={currentIndex === constraints.length - 1}
+                                                className={`p-1 rounded-full ${currentIndex === constraints.length - 1 ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-200 dark:text-gray-400 dark:hover:bg-gray-600'}`}
+                                            >
+                                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <span className="text-gray-400 text-sm">No constraints defined</span>
+                                    )}
+                                    {activeConstraint && currentIndex > 0 && (
+                                        <div className="text-[10px] text-gray-400 text-center mt-1">
+                                            Ignoring {currentIndex} stricter bottleneck(s)
+                                        </div>
+                                    )}
+                                </td>
+
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500 dark:text-gray-300">
+                                    <span className="text-lg font-bold text-gray-900 dark:text-white">{maxPallets === Infinity ? '∞' : maxPallets.toLocaleString()}</span>
+                                </td>
                             </tr>
                             );
                         })}

@@ -91,7 +91,6 @@ export interface DeductionRule {
 
 export interface AppSettings {
     rejectionCoefficients: Record<InventoryItemId, number>;
-    bypassedItems: Record<InventoryItemId, boolean>;
     stockThresholds: Record<InventoryItemId, { low: number; ideal: number }>;
     productFormulas: Record<ProductId, DeductionRule>;
     lotSequences: Record<LotLevel, number>;

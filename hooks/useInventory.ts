@@ -8,7 +8,6 @@ const ITEMS_MAP = new Map(INVENTORY_ITEMS.map(item => [item.id, item]));
 
 const generateDefaultSettings = (): AppSettings => ({
     rejectionCoefficients: INVENTORY_ITEMS.reduce((acc, item) => ({ ...acc, [item.id]: 0 }), {} as Record<InventoryItemId, number>),
-    bypassedItems: INVENTORY_ITEMS.reduce((acc, item) => ({ ...acc, [item.id]: false }), {} as Record<InventoryItemId, boolean>),
     stockThresholds: INVENTORY_ITEMS.reduce((acc, item) => ({ ...acc, [item.id]: { low: 5, ideal: 15 } }), {} as Record<InventoryItemId, { low: number, ideal: number }>),
     productFormulas: DEDUCTION_RULES,
     lotSequences: { 'LV1': 10000, 'LV2': 10000, 'LV3': 10000 },
@@ -53,7 +52,6 @@ const mergeSettings = (loadedSettings: Partial<AppSettings> | any): AppSettings 
         ...defaultSettings,
         ...loadedSettings,
         rejectionCoefficients: { ...defaultSettings.rejectionCoefficients, ...loadedSettings.rejectionCoefficients },
-        bypassedItems: { ...defaultSettings.bypassedItems, ...loadedSettings.bypassedItems },
         stockThresholds: { ...defaultSettings.stockThresholds, ...loadedSettings.stockThresholds },
         productFormulas: { ...defaultSettings.productFormulas, ...loadedSettings.productFormulas },
         lotSequences: { ...defaultSettings.lotSequences, ...loadedSettings.lotSequences },

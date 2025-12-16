@@ -40,7 +40,6 @@ const EditLotModal: React.FC<EditLotModalProps> = ({ lot, allTransactions, setti
             const formula = settings.productFormulas[pid as ProductId];
             if (!formula) return;
             
-            // Updated: Include bypassed items (Capacity Exempt)
             const requiredItems = (Object.values(formula.rawMaterials) as InventoryItemId[]);
             
             requiredItems.forEach(itemId => {
@@ -62,7 +61,7 @@ const EditLotModal: React.FC<EditLotModalProps> = ({ lot, allTransactions, setti
         });
         
         return map;
-    }, [lot.productIds, settings.productFormulas, settings.bypassedItems, allTransactions]);
+    }, [lot.productIds, settings.productFormulas, allTransactions]);
 
     useEffect(() => {
         const lotTransactions = allTransactions

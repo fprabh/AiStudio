@@ -13,10 +13,6 @@ interface InventoryListProps {
 }
 
 const getItemStatus = (item: InventoryItem, inventory: InventoryState, settings: InventoryListProps['settings']) => {
-    // If set to 'exclude from capacity', we show that status prominently
-    if (settings.bypassedItems[item.id]) {
-        return { text: 'Capacity Exempt', color: 'bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300' };
-    }
     const currentStock = inventory[item.id] || 0;
     const thresholds = settings.stockThresholds[item.id];
     

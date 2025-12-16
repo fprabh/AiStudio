@@ -192,7 +192,6 @@ const Settings: React.FC<SettingsProps> = ({ settings: initialSettings, updateSe
                                 <th className="px-4 py-2 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-300">Rejection (%)</th>
                                 <th className="px-4 py-2 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-300">Low Threshold</th>
                                 <th className="px-4 py-2 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-300">Ideal Threshold</th>
-                                <th className="px-4 py-2 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-300">Exclude Capacity</th>
                             </tr>
                         </thead>
                          <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
@@ -202,7 +201,6 @@ const Settings: React.FC<SettingsProps> = ({ settings: initialSettings, updateSe
                                     <td className="px-4 py-2 text-center"><input type="number" step="0.1" className={inputClass} value={localSettings.rejectionCoefficients[item.id]} onChange={e => handleSettingsChange('rejectionCoefficients', item.id, '', parseFloat(e.target.value) || 0)} /></td>
                                     <td className="px-4 py-2 text-center"><div className="flex items-center justify-center space-x-1"><input type="number" className={inputClass} value={localSettings.stockThresholds[item.id].low} onChange={e => handleSettingsChange('stockThresholds', item.id, 'low', parseInt(e.target.value) || 0)} /> <span className="text-xs text-gray-500">{item.unit}</span></div></td>
                                     <td className="px-4 py-2 text-center"><div className="flex items-center justify-center space-x-1"><input type="number" className={inputClass} value={localSettings.stockThresholds[item.id].ideal} onChange={e => handleSettingsChange('stockThresholds', item.id, 'ideal', parseInt(e.target.value) || 0)} /> <span className="text-xs text-gray-500">{item.unit}</span></div></td>
-                                    <td className="px-4 py-2 text-center"><input type="checkbox" className="h-5 w-5 rounded text-brand-red focus:ring-brand-red border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700" checked={localSettings.bypassedItems[item.id]} onChange={e => handleSettingsChange('bypassedItems', item.id, '', e.target.checked)} /></td>
                                 </tr>
                             ))}
                         </tbody>
