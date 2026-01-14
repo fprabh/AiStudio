@@ -14,6 +14,7 @@ import LogProductionForm from './components/LogProductionForm';
 import LogShipmentForm from './components/LogShipmentForm';
 import Settings from './components/Settings';
 import LotHistory from './components/LotHistory';
+import ScrapModal from './components/ScrapModal';
 import { useTheme } from './hooks/useTheme';
 
 const App: React.FC = () => {
@@ -60,6 +61,7 @@ const App: React.FC = () => {
         return <Dashboard 
                   inventory={inventoryData.inventory} 
                   productInventory={inventoryData.productInventory} 
+                  transactions={inventoryData.transactions}
                   setView={setView} 
                   settings={inventoryData.settings} 
                   onNavigate={handleNavigate}
@@ -68,6 +70,10 @@ const App: React.FC = () => {
         return <InventoryList 
                   inventory={inventoryData.inventory} 
                   settings={inventoryData.settings} 
+                  transactions={inventoryData.transactions}
+                  logScrap={inventoryData.logScrap}
+                  updateTransaction={inventoryData.updateTransaction}
+                  deleteTransaction={inventoryData.deleteTransaction}
                   highlightItemId={navItemId as InventoryItemId}
                   onNavigate={handleNavigate}
                 />;
@@ -132,9 +138,9 @@ const App: React.FC = () => {
                   logProduction={inventoryData.logProduction} 
                   setView={setView} 
                   inventory={inventoryData.inventory} 
+                  productInventory={inventoryData.productInventory}
                   settings={inventoryData.settings}
                   updateSettings={inventoryData.updateSettings}
-                  productInventory={inventoryData.productInventory}
                />;
       case 'logShipment':
         return <LogShipmentForm 
@@ -147,14 +153,13 @@ const App: React.FC = () => {
                 lotState={inventoryData.lotState}
             />;
       case 'settings':
-        return <Settings 
-          settings={inventoryData.settings} 
-          updateSettings={inventoryData.updateSettings}
-          exportData={inventoryData.exportData}
-          importData={inventoryData.importData}
-        />;
+        return (
+            <SettingsWrapper 
+                inventoryData={inventoryData}
+            />
+        );
       default:
-        return <Dashboard inventory={inventoryData.inventory} productInventory={inventoryData.productInventory} setView={setView} settings={inventoryData.settings} onNavigate={handleNavigate} />;
+        return <Dashboard inventory={inventoryData.inventory} productInventory={inventoryData.productInventory} transactions={inventoryData.transactions} setView={setView} settings={inventoryData.settings} onNavigate={handleNavigate} />;
     }
   };
 
@@ -167,5 +172,21 @@ const App: React.FC = () => {
     </div>
   );
 };
+
+// Wrapper to inject logScrap into Settings which has internal Modal state
+const SettingsWrapper = ({ inventoryData }: { inventoryData: any }) => {
+    return (
+        <>
+            <div className="relative">
+                <Settings 
+                    settings={inventoryData.settings} 
+                    updateSettings={inventoryData.updateSettings}
+                    exportData={inventoryData.exportData}
+                    importData={inventoryData.importData}
+                />
+            </div>
+        </>
+    )
+}
 
 export default App;

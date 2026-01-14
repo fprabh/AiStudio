@@ -3,9 +3,10 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { ProductId, View, Customer, InventoryState, ProductState, InventoryItemId, AppSettings, LotLevel } from '../types';
 import { FINISHED_PRODUCTS, INVENTORY_ITEMS, getProductLotConfig } from '../constants';
 import { useInventory } from '../hooks/useInventory';
+import { calculateDeductions } from '../utils';
 
 interface LogProductionFormProps {
-  logProduction: (productId: ProductId, cartonsProduced: number, orderNumber: string, date?: string, materialLinkage?: Partial<Record<InventoryItemId, string[]>>) => void;
+  logProduction: (productId: ProductId, cartonsProduced: number, orderNumber: string, date?: string, materialLinkage?: Partial<Record<InventoryItemId, string[]>>, extraRejection?: number) => void;
   setView: (view: View) => void;
   inventory: InventoryState;
   productInventory: ProductState;
@@ -24,23 +25,13 @@ interface LotAllocation {
 
 const ITEMS_MAP = new Map(INVENTORY_ITEMS.map(item => [item.id, item]));
 
-const getMasksPerRoll = (itemId: InventoryItemId, settings: AppSettings): number => {
-    if (itemId === 'meltblownFabric') return settings.materialUsage.masksPerRollMeltblown;
-    if (itemId === 'backLayerFabric') return settings.materialUsage.masksPerRollBackLayer;
-    if (itemId.startsWith('outerLayerL1')) return settings.materialUsage.masksPerRollOuterL1;
-    if (itemId.startsWith('outerLayerL2')) return settings.materialUsage.masksPerRollOuterL2;
-    if (itemId.startsWith('outerLayerL3')) return settings.materialUsage.masksPerRollOuterL3;
-    if (itemId === 'nosewire') return settings.materialUsage.masksPerRollNosewire;
-    if (itemId === 'elastic') return settings.materialUsage.masksPerRollElastic;
-    return 1; 
-};
-
 const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, setView, inventory, productInventory, settings, updateSettings }) => {
   const { transactions } = useInventory(); 
   const [customer, setCustomer] = useState<Customer | ''>('');
   const [productId, setProductId] = useState<ProductId | ''>('');
   const [cartons, setCartons] = useState<string>('');
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [extraRejection, setExtraRejection] = useState<string>('0');
 
   // Traceability State: Stores array of selected stock IDs for each item
   const [materialSelection, setMaterialSelection] = useState<Partial<Record<InventoryItemId, string[]>>>({});
@@ -149,7 +140,6 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
     });
 
     // 2. Find the appropriate lot to continue filling and determine max sequence
-    // Strategy: Look for the Highest Sequence Number for this customer/level.
     
     let maxTxSeq = 0; // Global max sequence for this Level (across all customers)
     
@@ -228,49 +218,45 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
   const deductionPreview = useMemo(() => {
     if (!productId || !cartons || parseFloat(cartons) <= 0) return null;
 
-    const rule = settings.productFormulas[productId];
-    if (!rule) return null;
-
+    const extraRej = parseFloat(extraRejection) || 0;
     const cartonsProduced = parseFloat(cartons);
-    const totalMasks = cartonsProduced * rule.boxesPerCarton * rule.masksPerBox;
     
-    const deductions: Partial<Record<InventoryItemId, number>> = {};
-
-    // Raw Materials
-    Object.values(rule.rawMaterials).forEach(unknownItemId => {
-        const itemId = unknownItemId as InventoryItemId;
-        const rejection = 1 + (settings.rejectionCoefficients[itemId] || 0) / 100;
-        let requiredQty = 0;
+    // Calculate deductions with extra rejection applied to raw materials
+    const details = calculateDeductions(productId as ProductId, cartonsProduced, settings, extraRej);
+    
+    // Create a map for easy lookup
+    const deductions: Partial<Record<InventoryItemId, { req: number; baseReq: number }>> = {};
+    
+    details.forEach(d => {
+        // Calculate what the requirement would be WITHOUT extra rejection for comparison
+        // Note: calculateDeductions returns negative values for deductions
+        const totalReq = Math.abs(d.quantity);
         
-        const itemInfo = ITEMS_MAP.get(itemId);
-        if (itemInfo?.unit === 'rolls') {
-             const masksPerRoll = getMasksPerRoll(itemId, settings);
-             requiredQty = (totalMasks / masksPerRoll) * rejection;
-
-             // FIX: Elastic requires 2 rolls (Left/Right) per mask production run
-             if (itemId === 'elastic') {
-                 requiredQty *= 2;
-             }
-        }
-        deductions[itemId] = requiredQty;
+        // We need to back-calculate base requirement to show the split
+        // But calculateDeductions applies it selectively.
+        // It's cleaner to call calculateDeductions twice.
+        deductions[d.itemId] = { req: totalReq, baseReq: 0 };
     });
-    
-    // Packaging Materials
-    deductions[rule.packaging.box] = cartonsProduced * rule.boxesPerCarton;
-    deductions[rule.packaging.carton] = cartonsProduced;
+
+    const baseDetails = calculateDeductions(productId as ProductId, cartonsProduced, settings, 0);
+    baseDetails.forEach(d => {
+        if(deductions[d.itemId]) {
+            deductions[d.itemId]!.baseReq = Math.abs(d.quantity);
+        }
+    });
     
     return deductions;
 
-  }, [productId, cartons, settings]);
+  }, [productId, cartons, settings, extraRejection]);
   
   const insufficientStockItems = useMemo(() => {
     if (!deductionPreview) return [];
     return Object.entries(deductionPreview)
-      .filter(([itemId, quantity]) => 
-          (inventory[itemId as InventoryItemId] || 0) < (quantity as number)
+      .filter(([itemId, vals]) => 
+          (inventory[itemId as InventoryItemId] || 0) < (vals as { req: number }).req
       )
       .map(([itemId]) => ITEMS_MAP.get(itemId as InventoryItemId)?.name);
-  }, [deductionPreview, inventory, settings]);
+  }, [deductionPreview, inventory]);
 
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -286,9 +272,11 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
           }
       });
 
+      const extraRej = parseFloat(extraRejection) || 0;
+
       // Log each allocation as a separate transaction
       lotAllocations.forEach(alloc => {
-          logProduction(productId, alloc.quantity, alloc.lotNumber, date, Object.keys(finalLinkage).length > 0 ? finalLinkage : undefined);
+          logProduction(productId, alloc.quantity, alloc.lotNumber, date, Object.keys(finalLinkage).length > 0 ? finalLinkage : undefined, extraRej);
       });
 
       // Update Lot Sequence Settings if we generated new lots with higher sequences
@@ -312,7 +300,7 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
   };
 
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="max-w-4xl mx-auto">
       <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">Log Production</h2>
       <p className="mb-4 text-gray-600 dark:text-gray-400">Record finished goods produced. The system will automatically assign Lot Numbers based on capacity and customer availability.</p>
       <form onSubmit={handleSubmit} className="p-6 sm:p-8 space-y-6 bg-white dark:bg-gray-800 rounded-lg shadow-md">
@@ -348,6 +336,16 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
             <div>
               <label htmlFor="date" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Production Date</label>
               <input type="date" id="date" value={date} onChange={e => setDate(e.target.value)} className="mt-1 block w-full pl-3 pr-3 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-red focus:border-brand-red sm:text-sm rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
+            </div>
+            <div>
+              <label htmlFor="extraRejection" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Extra Rejection (%)</label>
+              <div className="relative mt-1">
+                  <input type="number" id="extraRejection" value={extraRejection} onChange={e => setExtraRejection(e.target.value)} min="0" step="0.1" className="block w-full pl-3 pr-8 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-red focus:border-brand-red sm:text-sm rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="0" />
+                  <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                    <span className="text-gray-500 sm:text-sm">%</span>
+                  </div>
+              </div>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Optional. Increases raw material consumption (excluding packaging).</p>
             </div>
         </div>
 
@@ -463,22 +461,28 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
                     <thead className="bg-gray-50 dark:bg-gray-800">
                         <tr>
                             <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Item</th>
-                            <th scope="col" className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Required</th>
+                            <th scope="col" className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Standard</th>
+                            <th scope="col" className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Extra Waste</th>
+                            <th scope="col" className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Required</th>
                             <th scope="col" className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">In Stock</th>
                             <th scope="col" className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Remaining</th>
                         </tr>
                     </thead>
                     <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                        {Object.entries(deductionPreview).map(([itemId, qty], index) => {
+                        {Object.entries(deductionPreview).map(([itemId, valRaw], index) => {
+                            const val = valRaw as { req: number; baseReq: number };
                             const item = ITEMS_MAP.get(itemId as InventoryItemId);
                             if(!item) return null;
                             
-                            const requiredQty = qty as number;
+                            const requiredQty = val.req;
+                            const baseQty = val.baseReq;
+                            const extraQty = Math.max(0, requiredQty - baseQty);
+
                             const currentStock = inventory[itemId as keyof InventoryState] || 0;
                             const remainingStock = currentStock - requiredQty;
                             const isShortage = remainingStock < 0;
                             
-                            const formatVal = (val: number) => item.unit === 'rolls' ? val.toFixed(2) : val.toLocaleString(undefined, { maximumFractionDigits: 1 });
+                            const formatVal = (v: number) => item.unit === 'rolls' ? v.toFixed(2) : v.toLocaleString(undefined, { maximumFractionDigits: 1 });
 
                             return (
                                 <tr key={itemId} className={`odd:bg-white even:bg-gray-50 dark:odd:bg-gray-800 dark:even:bg-gray-700/50 ${isShortage ? 'bg-red-50 dark:bg-red-900/20' : ''}`}>
@@ -487,6 +491,12 @@ const LogProductionForm: React.FC<LogProductionFormProps> = ({ logProduction, se
                                         <span className="block text-xs text-gray-500 font-normal">{item.unit}</span>
                                     </td>
                                     <td className="px-4 py-3 text-sm text-right text-gray-500 dark:text-gray-300 font-mono">
+                                        {formatVal(baseQty)}
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-right text-orange-600 dark:text-orange-400 font-mono">
+                                        {extraQty > 0 ? `+${formatVal(extraQty)}` : '-'}
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-right font-bold text-gray-700 dark:text-white font-mono">
                                         {formatVal(requiredQty)}
                                     </td>
                                     <td className="px-4 py-3 text-sm text-right text-gray-500 dark:text-gray-300 font-mono">

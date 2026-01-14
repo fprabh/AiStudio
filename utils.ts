@@ -15,7 +15,7 @@ const getMasksPerRoll = (itemId: InventoryItemId, settings: AppSettings): number
     return 1; // Should not happen for valid roll-based items
 };
 
-export const calculateDeductions = (productId: ProductId, cartonsShipped: number, settings: AppSettings): TransactionDetail[] => {
+export const calculateDeductions = (productId: ProductId, cartonsShipped: number, settings: AppSettings, extraRejection: number = 0): TransactionDetail[] => {
     const product = FINISHED_PRODUCTS.find(p => p.id === productId);
     const rule = settings.productFormulas[productId];
     if (!product || !rule || !cartonsShipped || cartonsShipped <= 0) return [];
@@ -27,7 +27,6 @@ export const calculateDeductions = (productId: ProductId, cartonsShipped: number
     const rawMaterialItems = Object.values(rule.rawMaterials);
     for(const unknownItemId of rawMaterialItems) {
         const itemId = unknownItemId as InventoryItemId;
-        // Logic Update: We now deduct even if bypassed/exempt from capacity planning
         
         let quantity = 0;
         const itemInfo = ITEMS_MAP.get(itemId);
@@ -42,7 +41,8 @@ export const calculateDeductions = (productId: ProductId, cartonsShipped: number
         } 
         
         const rejectionRate = settings.rejectionCoefficients[itemId] || 0;
-        const adjustedQuantity = quantity * (1 + rejectionRate / 100);
+        // Apply extra rejection (additively) to raw materials
+        const adjustedQuantity = quantity * (1 + (rejectionRate + extraRejection) / 100);
         deductions[itemId] = (deductions[itemId] || 0) + adjustedQuantity;
     }
     
@@ -50,11 +50,11 @@ export const calculateDeductions = (productId: ProductId, cartonsShipped: number
     const packagingItems = Object.values(rule.packaging);
      for(const unknownItemId of packagingItems) {
         const itemId = unknownItemId as InventoryItemId;
-        // Logic Update: We now deduct even if bypassed/exempt from capacity planning
 
         let quantity = itemId === rule.packaging.box ? cartonsShipped * rule.boxesPerCarton : cartonsShipped;
         
         const rejectionRate = settings.rejectionCoefficients[itemId] || 0;
+        // Extra rejection does NOT apply to packaging
         const adjustedQuantity = quantity * (1 + rejectionRate / 100);
         deductions[itemId] = (deductions[itemId] || 0) + adjustedQuantity;
      }

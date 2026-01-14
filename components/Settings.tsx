@@ -2,7 +2,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useInventory } from '../hooks/useInventory';
 import { INVENTORY_ITEMS, FINISHED_PRODUCTS } from '../constants';
-import { InventoryItemId, ProductId } from '../types';
 
 type SettingsProps = {
     settings: ReturnType<typeof useInventory>['settings'];

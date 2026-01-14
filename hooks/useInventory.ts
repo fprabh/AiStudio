@@ -125,9 +125,14 @@ export const useInventory = () => {
             tx.details.forEach(detail => {
                 newInventory[detail.itemId] = (newInventory[detail.itemId] || 0) + detail.quantity;
             });
+        } else if (tx.type === 'SCRAP') {
+            tx.details.forEach(detail => {
+                // Scrap details quantity is stored as negative, so we simply add it
+                newInventory[detail.itemId] = (newInventory[detail.itemId] || 0) + detail.quantity;
+            });
         } else if (tx.type === 'PRODUCTION' && tx.productId && tx.cartonsShipped) {
             // 1. Deduct Raw Materials
-            const deductions = calculateDeductions(tx.productId, tx.cartonsShipped, settings);
+            const deductions = calculateDeductions(tx.productId, tx.cartonsShipped, settings, tx.extraRejection || 0);
             deductions.forEach(detail => {
                 newInventory[detail.itemId] = (newInventory[detail.itemId] || 0) + detail.quantity; // quantity is negative
             });
@@ -204,8 +209,24 @@ export const useInventory = () => {
     setTransactions(prev => [newTransaction, ...prev]);
   }, []);
 
+  const logScrap = useCallback((itemId: InventoryItemId, quantity: number, reason: string, date: string) => {
+    const item = ITEMS_MAP.get(itemId);
+    const newTransaction: Transaction = {
+        id: generateId(),
+        date: new Date(date).toISOString(),
+        type: 'SCRAP',
+        description: `Scrap: ${quantity} ${item?.unit} of ${item?.name}`,
+        details: [{
+            itemId,
+            itemName: item?.name || 'Unknown',
+            quantity: -quantity, // Store as negative to deduct
+            notes: reason
+        }]
+    };
+    setTransactions(prev => [newTransaction, ...prev]);
+  }, []);
 
-  const logProduction = useCallback((productId: ProductId, cartonsProduced: number, orderNumber: string, date?: string, materialLinkage?: Partial<Record<InventoryItemId, string[]>>) => {
+  const logProduction = useCallback((productId: ProductId, cartonsProduced: number, orderNumber: string, date?: string, materialLinkage?: Partial<Record<InventoryItemId, string[]>>, extraRejection: number = 0) => {
     const product = FINISHED_PRODUCTS.find(p => p.id === productId);
     if (!product) return;
 
@@ -218,7 +239,8 @@ export const useInventory = () => {
       orderNumber: orderNumber || undefined,
       productId: productId,
       cartonsShipped: cartonsProduced, 
-      materialLinkage: materialLinkage
+      materialLinkage: materialLinkage,
+      extraRejection: extraRejection
     };
 
     setTransactions(prev => [newTransaction, ...prev]);
@@ -360,5 +382,5 @@ export const useInventory = () => {
     });
   }, []);
 
-  return { inventory, productInventory, lotState, transactions, settings, lotMetadata, updateSettings, updateLotMetadata, addStock, logProduction, logShipment, logBatchShipments, exportData, importData, deleteTransaction, updateTransaction, addTransaction };
+  return { inventory, productInventory, lotState, transactions, settings, lotMetadata, updateSettings, updateLotMetadata, addStock, logScrap, logProduction, logShipment, logBatchShipments, exportData, importData, deleteTransaction, updateTransaction, addTransaction };
 };

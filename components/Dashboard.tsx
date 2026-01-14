@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { InventoryState, View, InventoryItemId, ProductId, ProductState, AppSettings, OnNavigate } from '../types';
+import { InventoryState, View, InventoryItemId, ProductId, ProductState, AppSettings, OnNavigate, Transaction } from '../types';
 import { INVENTORY_ITEMS, FINISHED_PRODUCTS } from '../constants';
 import { useInventory } from '../hooks/useInventory';
 import { ProductBadge, SmartLink } from './VisualHelpers';
@@ -11,6 +11,7 @@ type DashboardProps = {
   setView: (view: View) => void;
   settings: ReturnType<typeof useInventory>['settings'];
   onNavigate: OnNavigate;
+  transactions?: Transaction[];
 };
 
 interface Constraint {
@@ -88,7 +89,7 @@ const calculateConstraints = (product: typeof FINISHED_PRODUCTS[0], inventory: I
     });
 };
 
-const Dashboard: React.FC<DashboardProps> = ({ inventory, productInventory, setView, settings, onNavigate }) => {
+const Dashboard: React.FC<DashboardProps> = ({ inventory, productInventory, setView, settings, onNavigate, transactions }) => {
     // Local state to track which bottleneck index to show for each product
     const [bottleneckIndices, setBottleneckIndices] = useState<Record<string, number>>({});
 

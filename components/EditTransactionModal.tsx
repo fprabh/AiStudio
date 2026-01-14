@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { Transaction, InventoryItemId, ProductId, InventoryState, ProductState, LotState, TransactionDetail } from '../types';
 import { useInventory } from '../hooks/useInventory';
@@ -38,6 +39,11 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
     // Material Traceability State for Production (Multi-select)
     const [materialSelection, setMaterialSelection] = useState<Partial<Record<InventoryItemId, string[]>>>({});
 
+    // Scrap State
+    const [scrapItemId, setScrapItemId] = useState<InventoryItemId | ''>('');
+    const [scrapQuantity, setScrapQuantity] = useState('');
+    const [scrapReason, setScrapReason] = useState('');
+
     // Photo Proof State
     const [photos, setPhotos] = useState<string[]>(transaction.photos || []);
 
@@ -54,6 +60,11 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
         }
         if (transaction.type === 'SHIPMENT' && transaction.lotAllocations) {
             setAllocations(transaction.lotAllocations);
+        }
+        if (transaction.type === 'SCRAP' && transaction.details.length > 0) {
+            setScrapItemId(transaction.details[0].itemId);
+            setScrapQuantity(Math.abs(transaction.details[0].quantity).toString());
+            setScrapReason(transaction.details[0].notes || '');
         }
     }, [transaction]);
 
@@ -143,10 +154,10 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
 
     const productionDeductionDetails = useMemo(() => {
         if ((transaction.type === 'PRODUCTION' || transaction.type === 'OUT') && productId && cartonsShipped > 0) {
-            return calculateDeductions(productId as ProductId, cartonsShipped, settings);
+            return calculateDeductions(productId as ProductId, cartonsShipped, settings, transaction.extraRejection || 0);
         }
         return [];
-    }, [productId, cartonsShipped, settings, transaction.type]);
+    }, [productId, cartonsShipped, settings, transaction.type, transaction.extraRejection]);
 
     const lotStats = useMemo(() => {
         if ((transaction.type !== 'PRODUCTION' && transaction.type !== 'OUT') || !orderNumber || !productId || !transactions) return null;
@@ -249,7 +260,8 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
             description: '', // Will be updated below
             details: [],     // Will be updated below for IN transactions
             orderNumber: orderNumber || undefined,
-            photos: photos.length > 0 ? photos : undefined
+            photos: photos.length > 0 ? photos : undefined,
+            extraRejection: transaction.extraRejection // Preserve extra rejection if any
         };
 
         if (transaction.type === 'IN') {
@@ -288,6 +300,15 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
             baseTx.productId = productId as ProductId;
             baseTx.cartonsShipped = cartonsShipped;
             baseTx.lotAllocations = Object.keys(allocations).length > 0 ? allocations : undefined;
+        } else if (transaction.type === 'SCRAP') {
+            const item = ITEMS_MAP.get(scrapItemId as InventoryItemId);
+            baseTx.description = `Scrap: ${scrapQuantity} ${item?.unit} of ${item?.name}`;
+            baseTx.details = [{
+               itemId: scrapItemId as InventoryItemId,
+               itemName: item?.name || 'Unknown',
+               quantity: -Math.abs(parseFloat(scrapQuantity) || 0), // Ensure negative for deduction
+               notes: scrapReason
+            }];
         }
         
         onSave(baseTx);
@@ -297,6 +318,7 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
         if (transaction.type === 'IN') return "Edit Incoming Stock";
         if (transaction.type === 'PRODUCTION' || transaction.type === 'OUT') return "Edit Production Log";
         if (transaction.type === 'SHIPMENT') return "Edit Shipment Log";
+        if (transaction.type === 'SCRAP') return "Edit Scrap Entry";
         return "Edit Transaction";
     };
 
@@ -348,6 +370,59 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
             </div>
         </>
     );
+
+    const renderScrapForm = () => {
+        const item = ITEMS_MAP.get(scrapItemId as InventoryItemId);
+        return (
+            <div className="space-y-4">
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Inventory Item</label>
+                    <select
+                        value={scrapItemId}
+                        onChange={e => setScrapItemId(e.target.value as InventoryItemId)}
+                        className="mt-1 block w-full input-base"
+                        required
+                    >
+                        <option value="" disabled>Select an item</option>
+                        {INVENTORY_ITEMS.map(item => (
+                            <option key={item.id} value={item.id}>{item.name}</option>
+                        ))}
+                    </select>
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Quantity to Scrap</label>
+                    <div className="relative mt-1">
+                        <input
+                            type="number"
+                            value={scrapQuantity}
+                            onChange={e => setScrapQuantity(e.target.value)}
+                            step="any"
+                            min="0.0001"
+                            className="block w-full pl-3 pr-12 py-2 border-gray-300 focus:ring-brand-red focus:border-brand-red sm:text-sm rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                            placeholder="0.00"
+                            required
+                        />
+                        <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                            <span className="text-gray-500 sm:text-sm">
+                                {item?.unit || ''}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Reason</label>
+                    <input
+                        type="text"
+                        value={scrapReason}
+                        onChange={e => setScrapReason(e.target.value)}
+                        className="mt-1 block w-full input-base"
+                        placeholder="e.g., Damaged, Expired, Test Run"
+                        required
+                    />
+                </div>
+            </div>
+        );
+    };
 
     const renderMaterialTraceabilityForm = () => {
         if ((transaction.type !== 'PRODUCTION' && transaction.type !== 'OUT') || requiredTraceabilityItems.length === 0) return null;
@@ -460,7 +535,7 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
         const originalDeductionsMap = new Map<InventoryItemId, number>();
         if (transaction.type === 'PRODUCTION' || transaction.type === 'OUT') {
              if (transaction.productId && transaction.cartonsShipped) {
-                  const originalCalc = calculateDeductions(transaction.productId, transaction.cartonsShipped, settings);
+                  const originalCalc = calculateDeductions(transaction.productId, transaction.cartonsShipped, settings, transaction.extraRejection || 0);
                   originalCalc.forEach(d => originalDeductionsMap.set(d.itemId, Math.abs(d.quantity)));
              } else {
                   transaction.details.forEach(d => originalDeductionsMap.set(d.itemId, Math.abs(d.quantity)));
@@ -521,18 +596,21 @@ const EditTransactionModal: React.FC<EditModalProps> = ({ transaction, onClose, 
                             <label className="block text-sm font-medium">Date</label>
                             <input type="date" value={date} onChange={e => setDate(e.target.value)} className="mt-1 block w-full input-base" required />
                         </div>
-                        <div>
-                            <label className="block text-sm font-medium">
-                                {transaction.type === 'IN' ? 'Vendor PO' : transaction.type === 'PRODUCTION' || transaction.type === 'OUT' ? 'Lot Number' : 'Reference Number'}
-                            </label>
-                            <input type="text" value={orderNumber} onChange={e => setOrderNumber(e.target.value)} className="mt-1 block w-full input-base font-mono" />
-                        </div>
+                        {transaction.type !== 'SCRAP' && (
+                            <div>
+                                <label className="block text-sm font-medium">
+                                    {transaction.type === 'IN' ? 'Vendor PO' : transaction.type === 'PRODUCTION' || transaction.type === 'OUT' ? 'Lot Number' : 'Reference Number'}
+                                </label>
+                                <input type="text" value={orderNumber} onChange={e => setOrderNumber(e.target.value)} className="mt-1 block w-full input-base font-mono" />
+                            </div>
+                        )}
                     </div>
 
                     {transaction.type === 'IN' && renderMultiItemStockInForm()}
                     {(transaction.type === 'PRODUCTION' || transaction.type === 'OUT') && renderProductForm("Cartons Produced")}
                     {transaction.type === 'SHIPMENT' && renderProductForm("Cartons Shipped")}
-                    
+                    {transaction.type === 'SCRAP' && renderScrapForm()}
+
                     {/* Photo Management Section */}
                     {(transaction.type === 'IN' || transaction.type === 'SHIPMENT') && (
                         <div className="mt-4 border-t border-gray-100 dark:border-gray-700 pt-4">

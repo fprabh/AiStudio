@@ -50,6 +50,9 @@ const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, settings,
           case 'OUT':
               // Truck icon
               return <svg className="h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" /><path fillRule="evenodd" d="M3 4a2 2 0 00-2 2v5.5a3.5 3.5 0 003.5 3.5h9A3.5 3.5 0 0017 11.5V6a2 2 0 00-2-2H3zm12.5 7.5a2.5 2.5 0 00-2.5-2.5H3V6h12v5.5z" clipRule="evenodd" /><path d="M14 9H6V7h8v2z" /></svg>;
+          case 'SCRAP':
+              // Trash icon
+              return <svg className="h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>;
       }
   }
 
@@ -58,6 +61,7 @@ const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, settings,
           case 'IN': return 'bg-green-100 text-green-800';
           case 'PRODUCTION': return 'bg-blue-100 text-blue-800';
           case 'SHIPMENT': return 'bg-gray-100 text-gray-800';
+          case 'SCRAP': return 'bg-red-100 text-red-800';
           default: return 'bg-gray-100 text-gray-800';
       }
   }
@@ -67,6 +71,7 @@ const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, settings,
           case 'IN': return 'bg-green-500';
           case 'PRODUCTION': return 'bg-blue-500';
           case 'SHIPMENT': return 'bg-brand-dark';
+          case 'SCRAP': return 'bg-red-500';
           default: return 'bg-gray-500';
       }
   }
@@ -76,6 +81,7 @@ const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, settings,
           case 'IN': return 'Stock In';
           case 'PRODUCTION': return 'Production';
           case 'SHIPMENT': return 'Shipment Out';
+          case 'SCRAP': return 'Scrap / Adjustment';
           default: return 'Transaction';
       }
   }
@@ -153,7 +159,7 @@ const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, settings,
                 {sortedTransactions.map((transaction, transactionIdx) => {
                   // PRODUCTION consumes materials
                   const detailsToDisplay = (transaction.type === 'PRODUCTION' || transaction.type === 'OUT') && transaction.productId && transaction.cartonsShipped
-                    ? calculateDeductions(transaction.productId, transaction.cartonsShipped, settings)
+                    ? calculateDeductions(transaction.productId, transaction.cartonsShipped, settings, transaction.extraRejection || 0)
                     : transaction.details;
 
                   return (
@@ -175,6 +181,9 @@ const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, settings,
                                     {new Date(transaction.date).toLocaleString()}
                                 </p>
                                 <p className="mt-2 font-medium text-gray-900 dark:text-white">{transaction.description}</p>
+                                {transaction.extraRejection ? (
+                                    <p className="text-xs text-orange-600 mt-1">Includes +{transaction.extraRejection}% extra waste</p>
+                                ) : null}
                               </div>
                               <span className={`flex-shrink-0 ml-4 px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getBadgeClass(transaction.type)}`}>
                                   {getLabel(transaction.type)}
@@ -195,6 +204,9 @@ const TransactionLog: React.FC<TransactionLogProps> = ({ transactions, settings,
                                         <span className="ml-2 text-xs bg-gray-100 dark:bg-gray-700 px-1 rounded text-gray-500 dark:text-gray-400 font-mono">
                                             <SmartLink type="stock" value={detail.stockId} label={`ID: ${detail.stockId}`} onNavigate={onNavigate} className="text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400 no-underline hover:underline" />
                                         </span>
+                                    )}
+                                    {detail.notes && (
+                                        <span className="ml-2 text-xs text-gray-400 italic">({detail.notes})</span>
                                     )}
                                 </span>
                                 <span className={`font-mono ${detail.quantity > 0 ? 'text-green-600' : 'text-red-600'}`}>

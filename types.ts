@@ -34,7 +34,7 @@ export interface LotMetadata {
     notes?: string;
 }
 
-export type TransactionType = 'IN' | 'OUT' | 'PRODUCTION' | 'SHIPMENT'; // Keeping OUT for legacy parsing safely
+export type TransactionType = 'IN' | 'OUT' | 'PRODUCTION' | 'SHIPMENT' | 'SCRAP'; // Added SCRAP
 
 export interface TransactionDetail {
   itemId: InventoryItemId;
@@ -54,6 +54,8 @@ export interface Transaction {
   // For PRODUCTION and SHIPMENT
   productId?: ProductId;
   cartonsShipped?: number; // Used for both produced count and shipped count
+  // For PRODUCTION
+  extraRejection?: number; // Optional Extra Rejection Percentage
   // For SHIPMENT - Track which lots were used
   lotAllocations?: Record<string, number>; // LotNumber -> Quantity Used
   // For PRODUCTION - Track which Raw Material Stock IDs were used
